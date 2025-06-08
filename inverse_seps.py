@@ -11,7 +11,7 @@ from ops_utils import rbDataSet
 from torch.utils.data import DataLoader, Dataset
 from collections import defaultdict
 import random
-
+import rware
 class IndexShuffler(gym.Wrapper):
     def __init__(self, env):
         super().__init__(env)
