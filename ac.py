@@ -1,10 +1,10 @@
 import logging
 import time
-#from collections import deque
+from collections import deque
 from functools import partial
 from os import path
 from pathlib import Path
-#from collections import defaultdict
+from collections import defaultdict
 import rware
 import pickle
 from cpprb import ReplayBuffer, create_before_add_func, create_env_dict
@@ -33,9 +33,7 @@ ex = Experiment(ingredients=[ops_ingredient])
 #logging.basicConfig(
 #    level=logging.INFO,
 #    format="(%(process)d) [%(levelname).1s] - (%(asctime)s) >> %(message)s",#
-#    datefmt="%m/%d %H:%M:%S",
-#)
-
+#    datefmt="%m/%d %H:%M:%S",)
 
 @ex.config
 def config(ops):
@@ -138,19 +136,22 @@ class SMACWrapper(VecEnvWrapper):
         obs = self.venv.reset()
         state = self._make_state(len(obs))
         action_mask = self._make_action_mask(len(obs))
-        return obs, state, action_mask
+        # no one is “terminated” or “truncated” on reset
+        terminated = [False] * len(obs)
+        truncated  = [False] * len(obs)
+        info = {}
+        # return 5-tuple
+        return (obs, state, action_mask), None, terminated, truncated, info
 
     def step_wait(self):
-        obs, rew, done, info = self.venv.step_wait()
+        (obs, state, action_mask), rew, done, info = self.venv.step_wait()
         state = self._make_state(len(obs))
         action_mask = self._make_action_mask(len(obs))
+        # `done` here is your per-agent done list
+        terminated = list(done)
+        truncated  = [False] * len(done)
 
-        return (
-            (obs, state, action_mask),
-            rew,
-            done,
-            info,
-        )
+        return (obs, state, action_mask), rew, terminated, truncated, info
 
 
 @ex.capture
@@ -167,7 +168,8 @@ def _compute_returns(storage, next_value, gamma):
 def _make_envs(env_name, env_args, parallel_envs, dummy_vecenv, wrappers, time_limit, seed):
     def _env_thunk(seed):
         # print(env_args)
-        env = gym.make(env_name, **env_args)
+        env = gym.make(env_name,render_mode="rgb_array", **env_args)
+        env.reset(seed=seed)
         if time_limit:
             env = TimeLimit(env, time_limit)
         # ────── INSERT YOUR MONITOR HERE ──────  
@@ -175,12 +177,12 @@ def _make_envs(env_name, env_args, parallel_envs, dummy_vecenv, wrappers, time_l
         env = Monitor(
            env,
             video_folder="./videos",             # or None, if you only want stats
-            episode_trigger=lambda _: True       # record _every_ episode
+            episode_trigger=lambda _: False      # record _every_ episode
         )
         # ──────────────────────────────────────
         for wrapper in wrappers:
             env = wrapper(env)
-        env.seed(seed)
+        
         return env
 
     env_thunks = [partial(_env_thunk, seed + i) for i in range(parallel_envs)]
