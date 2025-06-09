@@ -27,8 +27,8 @@ from wrappers import *
 from wrappers import Monitor
 ex = Experiment(ingredients=[ops_ingredient])
 # ex.captured_out_filter = apply_backspaces_and_linefeeds
-#ex.captured_out_filter = lambda captured_output: "Output capturing turned off."
-#ex.observers.append(FileStorageObserver('output/'))
+ex.captured_out_filter = lambda captured_output: "Output capturing turned off."
+ex.observers.append(FileStorageObserver('output/'))
 
 #logging.basicConfig(
 #    level=logging.INFO,

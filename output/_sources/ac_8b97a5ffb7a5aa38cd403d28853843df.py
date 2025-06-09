@@ -1,10 +1,10 @@
 import logging
 import time
-#from collections import deque
+from collections import deque
 from functools import partial
 from os import path
 from pathlib import Path
-#from collections import defaultdict
+from collections import defaultdict
 import rware
 import pickle
 from cpprb import ReplayBuffer, create_before_add_func, create_env_dict
@@ -27,14 +27,14 @@ from wrappers import *
 from wrappers import Monitor
 ex = Experiment(ingredients=[ops_ingredient])
 # ex.captured_out_filter = apply_backspaces_and_linefeeds
-#ex.captured_out_filter = lambda captured_output: "Output capturing turned off."
-#ex.observers.append(FileStorageObserver('output/'))
+ex.captured_out_filter = lambda captured_output: "Output capturing turned off."
+ex.observers.append(FileStorageObserver('output/'))
 
-#logging.basicConfig(
-#    level=logging.INFO,
-#    format="(%(process)d) [%(levelname).1s] - (%(asctime)s) >> %(message)s",#
-#    datefmt="%m/%d %H:%M:%S",
-#)
+logging.basicConfig(
+    level=logging.INFO,
+    format="(%(process)d) [%(levelname).1s] - (%(asctime)s) >> %(message)s",
+    datefmt="%m/%d %H:%M:%S",
+)
 
 
 @ex.config

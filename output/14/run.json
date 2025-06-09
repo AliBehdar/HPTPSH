@@ -1,0 +1,124 @@
+{
+  "artifacts": [],
+  "command": "main",
+  "experiment": {
+    "base_dir": "/home/devuser/seps",
+    "dependencies": [
+      "cpprb==11.0.0",
+      "gymnasium==1.1.1",
+      "numpy==2.0.1",
+      "rware==2.0.0",
+      "sacred==0.8.7",
+      "stable-baselines3==2.6.0",
+      "torch==2.7.0",
+      "tqdm==4.67.1"
+    ],
+    "mainfile": "ac.py",
+    "name": "ac",
+    "repositories": [
+      {
+        "commit": "fb7b45d0df855defac59396ddb62057e2d7d75c6",
+        "dirty": true,
+        "url": "git@github.com:AliBehdar/HPTPSH.git"
+      },
+      {
+        "commit": "fb7b45d0df855defac59396ddb62057e2d7d75c6",
+        "dirty": true,
+        "url": "git@github.com:AliBehdar/HPTPSH.git"
+      },
+      {
+        "commit": "fb7b45d0df855defac59396ddb62057e2d7d75c6",
+        "dirty": true,
+        "url": "git@github.com:AliBehdar/HPTPSH.git"
+      },
+      {
+        "commit": "fb7b45d0df855defac59396ddb62057e2d7d75c6",
+        "dirty": true,
+        "url": "git@github.com:AliBehdar/HPTPSH.git"
+      }
+    ],
+    "sources": [
+      [
+        "ac.py",
+        "_sources/ac_8b97a5ffb7a5aa38cd403d28853843df.py"
+      ],
+      [
+        "model.py",
+        "_sources/model_1059a49ae730402d4a315dd368de6365.py"
+      ],
+      [
+        "ops_utils.py",
+        "_sources/ops_utils_85ac4ea5e64239007a6a533e231b56a2.py"
+      ],
+      [
+        "wrappers.py",
+        "_sources/wrappers_0764b1e331d0045db16a23c931cbbeea.py"
+      ]
+    ]
+  },
+  "fail_trace": [
+    "Traceback (most recent call last):\n",
+    "  File \"/home/devuser/anaconda3/envs/MASP/lib/python3.11/site-packages/sacred/config/captured_function.py\", line 42, in captured_function\n    result = wrapped(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^^^^\n",
+    "  File \"/home/devuser/seps/ac.py\", line 305, in main\n    envs = _make_envs()\n           ^^^^^^^^^^^^\n",
+    "  File \"/home/devuser/anaconda3/envs/MASP/lib/python3.11/site-packages/sacred/config/captured_function.py\", line 42, in captured_function\n    result = wrapped(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^^^^\n",
+    "  File \"/home/devuser/seps/ac.py\", line 188, in _make_envs\n    envs = DummyVecEnv(env_thunks)\n           ^^^^^^^^^^^^^^^^^^^^^^^\n",
+    "  File \"/home/devuser/anaconda3/envs/MASP/lib/python3.11/site-packages/stable_baselines3/common/vec_env/dummy_vec_env.py\", line 31, in __init__\n    self.envs = [_patch_env(fn()) for fn in env_fns]\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n",
+    "  File \"/home/devuser/anaconda3/envs/MASP/lib/python3.11/site-packages/stable_baselines3/common/vec_env/dummy_vec_env.py\", line 31, in <listcomp>\n    self.envs = [_patch_env(fn()) for fn in env_fns]\n                            ^^^^\n",
+    "  File \"/home/devuser/seps/ac.py\", line 172, in _env_thunk\n    env = TimeLimit(env, time_limit)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^\n",
+    "  File \"/home/devuser/seps/wrappers.py\", line 123, in __init__\n    super().__init__(env)\n",
+    "TypeError: TimeLimit.__init__() missing 1 required positional argument: 'max_episode_steps'\n"
+  ],
+  "heartbeat": "2025-06-08T13:50:44.253565",
+  "host": {
+    "ENV": {},
+    "cpu": "12th Gen Intel(R) Core(TM) i7-1255U",
+    "hostname": "AliBehdarnejad-PC",
+    "os": [
+      "Linux",
+      "Linux-5.15.167.4-microsoft-standard-WSL2-x86_64-with-glibc2.39"
+    ],
+    "python_version": "3.11.11"
+  },
+  "meta": {
+    "command": "main",
+    "config_updates": {
+      "env_name": "rware-tiny-4ag-v2",
+      "time_limit": 500
+    },
+    "named_configs": [],
+    "options": {
+      "--beat-interval": null,
+      "--capture": null,
+      "--comment": null,
+      "--debug": false,
+      "--enforce_clean": false,
+      "--file_storage": null,
+      "--force": false,
+      "--help": false,
+      "--id": null,
+      "--loglevel": null,
+      "--mongo_db": null,
+      "--name": null,
+      "--pdb": false,
+      "--print-config": false,
+      "--priority": null,
+      "--queue": false,
+      "--s3": null,
+      "--sql": null,
+      "--tiny_db": null,
+      "--unobserved": false,
+      "COMMAND": null,
+      "UPDATE": [
+        "env_name=rware-tiny-4ag-v2",
+        "time_limit=500"
+      ],
+      "help": false,
+      "with": true
+    }
+  },
+  "resources": [],
+  "result": null,
+  "start_time": "2025-06-08T13:50:44.247251",
+  "status": "FAILED",
+  "stop_time": "2025-06-08T13:50:44.254680"
+}
