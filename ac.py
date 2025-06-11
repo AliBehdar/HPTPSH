@@ -340,7 +340,7 @@ def main(
     optimizer = torch.optim.Adam(model.parameters(), lr, eps=optim_eps)
 
     # creates and initialises storage
-    obs, state, action_mask = envs.reset()
+    obs, state, action_mask,*_ = envs.reset()
 
     storage = defaultdict(lambda: deque(maxlen=n_steps))
     storage["obs"] = deque(maxlen=n_steps + 1)

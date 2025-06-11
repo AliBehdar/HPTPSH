@@ -133,7 +133,7 @@ class SquashDones(gym.Wrapper):
             else:
                 terminated = list(done4)
             # no truncated info in old API
-            truncated = [False] * len(terminated)
+                truncated = [False] * len(terminated)
 
         # 3) squash per-agent flags to a single boolean per agent for downstream
         #    (but keep both lists around for Gymnasium semantics)
@@ -233,7 +233,7 @@ class ClearInfo(gym.Wrapper):
                 terminated = [done4] * n_agents
             else:
                 terminated = list(done4)
-            truncated = [False] * len(terminated)
+                truncated = [False] * len(terminated)
 
         # always clear info
         return obs, rew, terminated, truncated, {}

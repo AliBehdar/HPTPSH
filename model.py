@@ -64,9 +64,11 @@ class MultiAgentFCNetwork(nn.Module):
             self.independent.append(self._make_fc(dims))
 
     def forward(self, inputs, laac_indices):
-        # print(inputs[0].shape)
-        # assert inputs[0].dim() == 2
-        # out2 = self.forward2(inputs, laac_indices)
+        #print(inputs)
+        print(inputs[0].shape)
+        #assert inputs[0].dim() == 2
+        #out2 = self.forward2(inputs, laac_indices)
+        
         inputs = torch.stack(inputs)
         out = torch.stack([net(inputs) for net in self.independent])
         if inputs[0].dim() == 3:
