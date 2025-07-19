@@ -100,7 +100,6 @@ class MultiAgentFCNetwork(nn.Module):
         return out
 
 
-
 class Policy(nn.Module):
     def __init__(self, obs_space, action_space, architecture, laac_size, state_size):
         super(Policy, self).__init__()
@@ -180,7 +179,6 @@ class Policy(nn.Module):
             action_log_probs,
             dist_entropy,
         )
-
 
 # define a simple linear VAE
 class LinearVAE(nn.Module):

@@ -44,11 +44,7 @@ def config(ops):
     time_limit = None
     env_args = {}
 
-    wrappers = (
-        RecordEpisodeStatistics,
-        SquashDones,
-        SMACCompatible,
-    )
+    wrappers = (RecordEpisodeStatistics,SquashDones,SMACCompatible,)
     dummy_vecenv = True
 
     # everything below is update steps (not env steps!)
