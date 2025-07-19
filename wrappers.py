@@ -84,6 +84,7 @@ class RecordEpisodeStatistics(gym.Wrapper):
         return obs, rew, terminated, truncated, info
 
 
+
 class FlattenObservation(ObservationWrapper):
     r"""Observation wrapper that flattens the observation of individual agents."""
 
@@ -144,6 +145,7 @@ class SquashDones(gym.Wrapper):
         return obs, reward, terminated, truncated, info
 
 
+
 class GlobalizeReward(gym.RewardWrapper):
     def reward(self, reward):
         return self.n_agents * [sum(reward)]
@@ -179,7 +181,6 @@ class StandardizeReward(gym.RewardWrapper):
         var = (self.stdr_wrp_t * self.stdr_wrp_n) / (self.stdr_wrp_sumw*(self.stdr_wrp_n-1))
         stdr_rew = (reward - self.stdr_wrp_wmean) / (np.sqrt(var) + 1e-6)
         return stdr_rew
-
 
 class TimeLimit(gym.wrappers.TimeLimit):
     def __init__(self, env, max_episode_steps=None):
@@ -218,7 +219,6 @@ class TimeLimit(gym.wrappers.TimeLimit):
                 terminated = list(done4)
             truncated = [False] * len(terminated)
         return obs, rew, terminated, truncated, info
-
 
 class ClearInfo(gym.Wrapper):
     #def step(self, action):
