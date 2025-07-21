@@ -226,7 +226,7 @@ class LinearVAE(nn.Module):
         
     def forward(self, x, xp):
         # encoding
-#         x, _ = self.gru(x)
+        # x, _ = self.gru(x)
         x = self.encoder(x)
         
         mu = x[: , :self.features]

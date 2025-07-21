@@ -38,7 +38,7 @@ ex = Experiment(ingredients=[ops_ingredient])
 @ex.config
 def config(ops):
     name = "SePS release"
-    version = 0
+    version = 2
 
     env_name = None
     time_limit = None
