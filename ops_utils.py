@@ -50,7 +50,7 @@ class rbDataSet(Dataset):
         self.data.append(torch.cat([torch.from_numpy(self.rb[n]) for n in decoder_in], dim=1))
         self.data.append(torch.cat([torch.from_numpy(self.rb[n]) for n in reconstruct], dim=1))
         
-        print([x.shape for x in self.data])
+        ##print([x.shape for x in self.data])
     def __len__(self):
         return self.data[0].shape[0]
     def __getitem__(self, idx):
@@ -67,7 +67,7 @@ def compute_clusters(rb, agent_count, batch_size, clusters, lr, epochs, z_featur
     reconstruct_size = dataset.data[2].shape[-1]
     
     model = LinearVAE(z_features, input_size, extra_decoder_input, reconstruct_size)
-    print(model)
+    ##print(model)
     model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
@@ -107,7 +107,7 @@ def compute_clusters(rb, agent_count, batch_size, clusters, lr, epochs, z_featur
         train_epoch_loss = fit(model, dataloader)
         train_loss.append(train_epoch_loss)
 
-    print(f"Train Loss: {train_epoch_loss:.6f}")
+    ##print(f"Train Loss: {train_epoch_loss:.6f}")
     x = torch.eye(agent_count)
 
     with torch.no_grad():

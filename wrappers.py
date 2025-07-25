@@ -34,54 +34,50 @@ class RecordEpisodeStatistics(gym.Wrapper):
     def reset(self, **kwargs):
         """Reset env and episode stats."""
         #obs, info = super().reset(**kwargs)
-        obs = super().reset(**kwargs)
+        obs ,info = super().reset(**kwargs)
+        #print("This is obs and info from reset funcion in wappers line 38",obs,info)
         obs=obs[0] if isinstance(obs,(tuple,list)) else obs
         # Reset counters
         self.episode_reward[:] = 0.0
         self.episode_length = 0
         self.t0 = perf_counter()
-        return obs
+        return obs ,info
 
     def step(self, action):
         """Step through env, track multi-agent episode stats, and return 5-tuple."""
         out = super().step(action)
-
-        # 1) Normalize to 5-tuple: (obs, rew, terminated, truncated, info)
-        if len(out) == 5:
-            obs, rew, terminated, truncated, info = out
+        # Pull off the first five elements (obs, rew, terminated, truncated, info)
+        if len(out) >= 5:
+            obs, rew, terminated, truncated, info = out[:5]
         else:
-            # Old 4-tuple: (obs, rew, done, info)
+            # Fallback for old 4-tuple: (obs, rew, done, info)
             obs, rew, done4, info = out
-            if isinstance(done4, bool):
-                terminated = [done4] * self.n_agents
-            else:
-                terminated = list(done4)
-            truncated = [False] * len(terminated)
+            terminated = ([done4] * self.n_agents) if isinstance(done4, bool) else list(done4)
+            truncated  = [False] * len(terminated)
 
-        # 2) Combine per-agent flags into a single Python list
+        # Always make these into lists
+        if not isinstance(terminated, (list, tuple)):
+            terminated = [terminated]
+        if not isinstance(truncated,  (list, tuple)):
+            truncated  = [truncated]
+
         done_list = [t or tr for t, tr in zip(terminated, truncated)]
 
-        # 3) Accumulate rewards & length
-        #    Ensure rew is a list of floats
+        # Accumulate rewards & lengths
         rew_list = rew.tolist() if isinstance(rew, np.ndarray) else list(rew)
         for i, r in enumerate(rew_list):
             self.episode_reward[i] += float(r)
         self.episode_length += 1
 
-        # 4) If the whole multi-agent episode is done, log stats into `info`
         if all(done_list):
             info["episode_reward"] = list(self.episode_reward)
-            for i, r in enumerate(self.episode_reward):
-                info[f"agent{i}/episode_reward"] = float(r)
             info["episode_length"] = self.episode_length
-            info["episode_time"] = perf_counter() - self.t0
-
-            # Save into history
+            info["episode_time"]   = perf_counter() - self.t0
             self.reward_queue.append(list(self.episode_reward))
             self.length_queue.append(self.episode_length)
 
-        # 5) Return the full 5-tuple for Gymnasium compatibility
         return obs, rew, terminated, truncated, info
+
 
 
 
@@ -119,29 +115,22 @@ class SquashDones(gym.Wrapper):
     """Wrapper that squashes multiple dones to a single one using all(dones)"""
 
     def step(self, action):
-        # 1) step through the next wrapper/env
         out = super().step(action)
-
-        # 2) normalize Gymnasium 5-tuple vs old 4-tuple
-        if len(out) == 5:
-            obs, reward, terminated, truncated, info = out
+        # Normalize up to five elements
+        if len(out) >= 5:
+            obs, reward, terminated, truncated, info = out[:5]
         else:
-            # old 4-tuple: (obs, reward, done, info)
             obs, reward, done4, info = out
-            # build terminated list
-            if isinstance(done4, bool):
-                n_agents = len(obs)
-                terminated = [done4] * n_agents
-            else:
-                terminated = list(done4)
-            # no truncated info in old API
-                truncated = [False] * len(terminated)
+            terminated = ([done4] * len(obs)) if isinstance(done4, bool) else list(done4)
+            truncated  = [False] * len(terminated)
 
-        # 3) squash per-agent flags to a single boolean per agent for downstream
-        #    (but keep both lists around for Gymnasium semantics)
+        # Coerce to lists
+        if not isinstance(terminated, (list, tuple)):
+            terminated = [terminated]
+        if not isinstance(truncated,  (list, tuple)):
+            truncated  = [truncated]
+
         done_list = [t or tr for t, tr in zip(terminated, truncated)]
-
-        # 4) we return the full 5-tuple so DummyVecEnv can unpack it
         return obs, reward, terminated, truncated, info
 
 
@@ -218,6 +207,7 @@ class TimeLimit(gym.wrappers.TimeLimit):
             else:
                 terminated = list(done4)
             truncated = [False] * len(terminated)
+        #print("This is out from step funcion in wappers and TimeLimite line 222 ",obs, rew, terminated, truncated, info)
         return obs, rew, terminated, truncated, info
 
 class ClearInfo(gym.Wrapper):
@@ -237,7 +227,7 @@ class ClearInfo(gym.Wrapper):
             else:
                 terminated = list(done4)
                 truncated = [False] * len(terminated)
-
+        #print("This is obs, rew, terminated, truncated, info from step funcion in wappers and cleanInto line 242 ",obs, rew, terminated, truncated, info)
         # always clear info
         return obs, rew, terminated, truncated, {}
 
