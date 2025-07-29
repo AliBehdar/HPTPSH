@@ -302,47 +302,47 @@ def main(cfg):
 
     # make actor-critic model
     model = Policy(envs.observation_space, envs.action_space, cfg.network.architecture, model_count, state_size)
-    model.to(cfg.device)
-    optimizer = torch.optim.Adam(model.parameters(), cfg.lr, eps=cfg.optim_eps)
+    model.to(cfg.train.device)
+    optimizer = torch.optim.Adam(model.parameters(), cfg.train.lr, eps=cfg.train.optim_eps)
 
     # creates and initialises storage
     obs, state, action_mask = envs.reset()
 
-    storage = defaultdict(lambda: deque(maxlen=cfg.n_steps))
-    storage["obs"] = deque(maxlen= cfg.n_steps + 1)
-    storage["done"] = deque(maxlen=cfg.n_steps + 1)
+    storage = defaultdict(lambda: deque(maxlen=cfg.train.n_steps))
+    storage["obs"] = deque(maxlen= cfg.train.n_steps + 1)
+    storage["done"] = deque(maxlen=cfg.train.n_steps + 1)
     storage["obs"].append(obs)
-    storage["done"].append(torch.zeros(cfg.parallel_envs))
+    storage["done"].append(torch.zeros(cfg.train.parallel_envs))
     storage["info"] = deque(maxlen=10)
 
     # for smac:
-    storage["state"] = deque(maxlen=cfg.n_steps + 1)
-    storage["action_mask"] = deque(maxlen=cfg.n_steps + 1)
+    storage["state"] = deque(maxlen=cfg.train.n_steps + 1)
+    storage["action_mask"] = deque(maxlen=cfg.train.n_steps + 1)
     if cfg.central_v:
         storage["state"].append(state)
     storage["action_mask"].append(action_mask)
     # ---------
 
-    model.sample_laac(cfg.parallel_envs)
-    if cfg.algorithm_mode == "iac":
+    model.sample_laac(cfg.train.parallel_envs)
+    if cfg.train.algorithm_mode == "iac":
         model.laac_sample = torch.arange(len(envs.observation_space)).repeat(cfg.parallel_envs, 1)
         # print(model.laac_sample)
-    if cfg.algorithm_mode == "ops":
-        model.laac_sample = torch.zeros(cfg.parallel_envs, agent_count).long()
+    if cfg.train.algorithm_mode == "ops":
+        model.laac_sample = torch.zeros(cfg.train.parallel_envs, agent_count).long()
         # print(model.laac_sample)
 
     start_time = time.time()
-    for step in range(cfg.total_steps):
+    for step in range(cfg.train.total_steps):
         
-        if cfg.algorithm_mode == "ops" and step in [cfg.ops["delay"] + cfg.ops["pretraining_steps"]*(i+1) for i in range(cfg.ops["pretraining_times"])]:
+        if cfg.train.algorithm_mode == "ops" and step in [cfg.train.delay + cfg.train.pretraining_steps*(i+1) for i in range(cfg.train.pretraining_times)]:
             #print(f"Pretraining at step: {step}")
             cluster_idx = compute_clusters(rb.get_all_transitions(), agent_count)
-            model.laac_sample = cluster_idx.repeat(cfg.parallel_envs, 1)
+            model.laac_sample = cluster_idx.repeat(cfg.train.parallel_envs, 1)
             pickle.dump(rb.get_all_transitions(), open(f"{cfg.env_name}.p", "wb"))
             cfg._log.info(model.laac_sample)
 
 
-        if step % cfg.log_interval == 0 and len(storage["info"]):
+        if step % cfg.train.log_interval == 0 and len(storage["info"]):
             _log_progress(storage["info"], start_time, step)
             start_time = time.time()
             storage["info"].clear()
@@ -352,10 +352,10 @@ def main(cfg):
                 actions = model.act(storage["obs"][-1], storage["action_mask"][-1])
             (obs, state, action_mask), reward, done, info = envs.step(actions)
 
-            if use_proper_termination:
+            if cfg.train.use_proper_termination:
                 bad_done = torch.FloatTensor(
                     [1.0 if i.get("TimeLimit.truncated", False) else 0.0 for i in info]
-                ).to(device)
+                ).to(cfg.train.device)
                 done = done - bad_done
 
             storage["obs"].append(obs)
@@ -365,11 +365,11 @@ def main(cfg):
             storage["info"].extend([i for i in info if "episode_reward" in i])
             storage["laac_rewards"] += reward
 
-            if algorithm_mode == "ops" and step < ops["delay"] + ops["pretraining_times"] * ops["pretraining_steps"]:
+            if cfg.train.algorithm_mode == "ops" and step < cfg.train.delay + cfg.train.pretraining_times * cfg.train.pretraining_steps:
                 for agent in range(len(obs)):
 
                     one_hot_action = torch.nn.functional.one_hot(actions[agent], act_size).squeeze().numpy()
-                    one_hot_agent = torch.nn.functional.one_hot(torch.tensor(agent), agent_count).repeat(parallel_envs, 1).numpy()
+                    one_hot_agent = torch.nn.functional.one_hot(torch.tensor(agent), agent_count).repeat(cfg.train.parallel_envs, 1).numpy()
 
                     if bad_done[0]:
                         nobs = info[0]["terminal_observation"]
@@ -391,13 +391,13 @@ def main(cfg):
                     rb.add(**data)
 
             # for smac:
-            if central_v:
+            if cfg.central_v:
                 storage["state"].append(state)
 
             storage["action_mask"].append(action_mask)
             # ---------
 
-        if cfg.algorithm_mode == "ops" and step < cfg.ops["pretraining_steps"] and cfg.ops["delay_training"]:
+        if cfg.train.algorithm_mode == "ops" and step < cfg.train.pretraining_steps and cfg.train.delay_training:
             continue
 
         loss = _compute_loss(model, storage)
@@ -406,7 +406,7 @@ def main(cfg):
         #     loss += _compute_laac_loss(model, storage)
         if step %1000==0:  
             scalar_loss = loss.item() 
-            print("Step:",step," Total steps ",cfg.total_steps,"And loss",scalar_loss)
+            print("Step:",step," Total steps ",cfg.train.total_steps,"And loss",scalar_loss)
         optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
