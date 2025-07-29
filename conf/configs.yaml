@@ -1,0 +1,43 @@
+
+name : "SePS release"
+version : 0
+env_name : None
+time_limit : None
+env_args : {}
+wrappers : (RecordEpisodeStatistics,SquashDones,SMACCompatible,)
+dummy_vecenv : True
+central_v : False
+clusters : None
+
+
+network:
+  architecture : {"actor": [64, 64],"critic": [64, 64]}
+  human_selected_idx : None # like [0, 0, 0, 0, 1, 1, 1, 1] or None - only used for visualisation
+  encoder_in : ["agent"]
+  decoder_in : ["obs", "act"] # + "z"
+  reconstruct : ["next_obs", "rew"]
+
+train:
+  lr : 3e-4
+  optim_eps : 0.00001
+  parallel_envs : 8
+  n_steps : 5
+  gamma : 0.99
+  kl_weight : 0.0001
+  epochs : 10
+  z_features : 10
+  algorithm_mode : "ops" # "ops", "iac", "snac", or "snac-a"
+  device : "cpu"
+  ops_timestep : 100
+  delay : 0
+  pretraining_steps : 5000
+  pretraining_times : 1
+  batch_size : 128
+  total_steps : int(10e6)
+  log_interval : int(2e3)
+  save_interval : int(1e6)
+  eval_interval : int(1e4)
+  entropy_coef : 0.01
+  value_loss_coef : 0.5
+  use_proper_termination : True
+  delay_training : False

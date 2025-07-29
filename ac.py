@@ -5,7 +5,6 @@ from functools import partial
 from os import path
 from pathlib import Path
 from collections import defaultdict
-import rware
 import pickle
 from cpprb import ReplayBuffer, create_before_add_func, create_env_dict
 import gymnasium as gym
@@ -20,13 +19,12 @@ from sacred.observers import (
 )
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecEnvWrapper
 from torch.utils.tensorboard import SummaryWriter
-import warnings
-#warnings.filterwarnings("ignore", category=UserWarning, module="gymnasium.wrappers.rendering")
 
 from model import Policy
 from ops_utils import compute_clusters, ops_ingredient
 from wrappers import *
-from wrappers import Monitor
+import hydra
+
 ex = Experiment(ingredients=[ops_ingredient])
 # ex.captured_out_filter = apply_backspaces_and_linefeeds
 #ex.captured_out_filter = lambda captured_output: "Output capturing turned off."
@@ -36,8 +34,8 @@ ex = Experiment(ingredients=[ops_ingredient])
 #    level=logging.INFO,
 #    format="(%(process)d) [%(levelname).1s] - (%(asctime)s) >> %(message)s",#
 #    datefmt="%m/%d %H:%M:%S",)
+@hydra.main(config_path="../conf", config_name="config")
 
-@ex.config
 def config(ops):
     name = "SePS release"
     version = 0
@@ -83,20 +81,21 @@ def config(ops):
 
 
 class Torcherize(VecEnvWrapper):
-    @ex.capture
-    def __init__(self, venv, algorithm_mode):
+    
+    def __init__(self, cfg,venv):
         super().__init__(venv)
-        self.observe_agent_id = algorithm_mode == "snac-a"
+        #self.venv.reset()
+        self.cfg=cfg
+        self.observe_agent_id = cfg.algorithm_mode == "snac-a"
         if self.observe_agent_id:
             agent_count = len(self.observation_space)
             self.observation_space = gym.spaces.Tuple(tuple([gym.spaces.Box(low=-np.inf, high=np.inf, shape=((x.shape[0] + agent_count),), dtype=x.dtype) for x in self.observation_space]))
 
-    @ex.capture
-    def reset(self, device, parallel_envs):
+    def reset(self):
         obs = self.venv.reset()
-        obs = [torch.from_numpy(o).to(device) for o in obs]
+        obs = [torch.from_numpy(o).to(self.cfg.device) for o in obs]
         if self.observe_agent_id:
-            ids = torch.eye(len(obs)).repeat_interleave(parallel_envs, 0).view(len(obs), -1, len(obs))
+            ids = torch.eye(len(obs)).repeat_interleave(self.cfg.parallel_envs, 0).view(len(obs), -1, len(obs))
             obs = [torch.cat((ids[i], obs[i]), dim=1) for i in range(len(obs))]
         return obs
 
@@ -106,17 +105,17 @@ class Torcherize(VecEnvWrapper):
         return self.venv.step_async(actions)
 
     @ex.capture
-    def step_wait(self, device, parallel_envs):
+    def step_wait(self):
         obs, rew, done, info = self.venv.step_wait()
-        obs = [torch.from_numpy(o).float().to(device) for o in obs]
+        obs = [torch.from_numpy(o).float().to(self.cfg.device) for o in obs]
         if self.observe_agent_id:
-            ids = torch.eye(len(obs)).repeat_interleave(parallel_envs, 0).view(len(obs), -1, len(obs))
+            ids = torch.eye(len(obs)).repeat_interleave(self.cfg.parallel_envs, 0).view(len(obs), -1, len(obs))
             obs = [torch.cat((ids[i], obs[i]), dim=1) for i in range(len(obs))]
 
         return (
             obs,
-            torch.from_numpy(rew).float().to(device),
-            torch.from_numpy(done).float().to(device),
+            torch.from_numpy(rew).float().to(self.cfg.device),
+            torch.from_numpy(done).float().to(self.cfg.device),
             info,
         )
 
@@ -268,28 +267,7 @@ def _compute_loss(model, storage, value_loss_coef, entropy_coef, central_v):
     loss = actor_loss + value_loss_coef * value_loss
     return loss
 @ex.automain
-def main(
-    _run,
-    seed,
-    total_steps,
-    log_interval,
-    save_interval,
-    eval_interval,
-    architecture,
-    lr,
-    optim_eps,
-    parallel_envs,
-    n_steps,
-    use_proper_termination,
-    central_v,
-
-    ops,
-    algorithm_mode,
-    env_name,
-
-    device,
-    _log,
-):
+def main(cfg):
     torch.set_num_threads(1)
 
     envs = _make_envs()
@@ -306,70 +284,70 @@ def main(
         "act": {"shape": act_size, "dtype": np.float32},
         "agent": {"shape": agent_count, "dtype": np.float32},
     }
-    rb = ReplayBuffer(int(agent_count * ops['pretraining_steps'] * parallel_envs * n_steps), env_dict)
+    rb = ReplayBuffer(int(agent_count * cfg.train.pretraining_steps * cfg.train.parallel_envs * cfg.train.n_steps), env_dict)
 
     # before_add = create_before_add_func(env)
 
-    state_size = envs.get_attr("state_size")[0] if central_v else None
+    state_size = envs.get_attr("state_size")[0] if cfg.central_v else None
     
-    if algorithm_mode.startswith("snac"):
+    if cfg.train.algorithm_mode.startswith("snac"):
         model_count = 1
-    elif algorithm_mode == "iac":
+    elif cfg.train.algorithm_mode == "iac":
         model_count = len(envs.observation_space)
-    elif algorithm_mode == "ops":
-        if ops["clusters"]:
-            model_count = ops["clusters"]
+    elif cfg.train.algorithm_mode == "ops":
+        if cfg.clusters:
+            model_count = cfg.clusters
         else:
             model_count = min(10, len(envs.observation_space))
 
     # make actor-critic model
-    model = Policy(envs.observation_space, envs.action_space, architecture, model_count, state_size)
-    model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr, eps=optim_eps)
+    model = Policy(envs.observation_space, envs.action_space, cfg.network.architecture, model_count, state_size)
+    model.to(cfg.device)
+    optimizer = torch.optim.Adam(model.parameters(), cfg.lr, eps=cfg.optim_eps)
 
     # creates and initialises storage
     obs, state, action_mask = envs.reset()
 
-    storage = defaultdict(lambda: deque(maxlen=n_steps))
-    storage["obs"] = deque(maxlen=n_steps + 1)
-    storage["done"] = deque(maxlen=n_steps + 1)
+    storage = defaultdict(lambda: deque(maxlen=cfg.n_steps))
+    storage["obs"] = deque(maxlen= cfg.n_steps + 1)
+    storage["done"] = deque(maxlen=cfg.n_steps + 1)
     storage["obs"].append(obs)
-    storage["done"].append(torch.zeros(parallel_envs))
+    storage["done"].append(torch.zeros(cfg.parallel_envs))
     storage["info"] = deque(maxlen=10)
 
     # for smac:
-    storage["state"] = deque(maxlen=n_steps + 1)
-    storage["action_mask"] = deque(maxlen=n_steps + 1)
-    if central_v:
+    storage["state"] = deque(maxlen=cfg.n_steps + 1)
+    storage["action_mask"] = deque(maxlen=cfg.n_steps + 1)
+    if cfg.central_v:
         storage["state"].append(state)
     storage["action_mask"].append(action_mask)
     # ---------
 
-    model.sample_laac(parallel_envs)
-    if algorithm_mode == "iac":
-        model.laac_sample = torch.arange(len(envs.observation_space)).repeat(parallel_envs, 1)
+    model.sample_laac(cfg.parallel_envs)
+    if cfg.algorithm_mode == "iac":
+        model.laac_sample = torch.arange(len(envs.observation_space)).repeat(cfg.parallel_envs, 1)
         # print(model.laac_sample)
-    if algorithm_mode == "ops":
-        model.laac_sample = torch.zeros(parallel_envs, agent_count).long()
+    if cfg.algorithm_mode == "ops":
+        model.laac_sample = torch.zeros(cfg.parallel_envs, agent_count).long()
         # print(model.laac_sample)
 
     start_time = time.time()
-    for step in range(total_steps):
+    for step in range(cfg.total_steps):
         
-        if algorithm_mode == "ops" and step in [ops["delay"] + ops["pretraining_steps"]*(i+1) for i in range(ops["pretraining_times"])]:
+        if cfg.algorithm_mode == "ops" and step in [cfg.ops["delay"] + cfg.ops["pretraining_steps"]*(i+1) for i in range(cfg.ops["pretraining_times"])]:
             #print(f"Pretraining at step: {step}")
             cluster_idx = compute_clusters(rb.get_all_transitions(), agent_count)
-            model.laac_sample = cluster_idx.repeat(parallel_envs, 1)
-            pickle.dump(rb.get_all_transitions(), open(f"{env_name}.p", "wb"))
-            _log.info(model.laac_sample)
+            model.laac_sample = cluster_idx.repeat(cfg.parallel_envs, 1)
+            pickle.dump(rb.get_all_transitions(), open(f"{cfg.env_name}.p", "wb"))
+            cfg._log.info(model.laac_sample)
 
 
-        if step % log_interval == 0 and len(storage["info"]):
+        if step % cfg.log_interval == 0 and len(storage["info"]):
             _log_progress(storage["info"], start_time, step)
             start_time = time.time()
             storage["info"].clear()
 
-        for n_step in range(n_steps):
+        for n_step in range(cfg.n_steps):
             with torch.no_grad():
                 actions = model.act(storage["obs"][-1], storage["action_mask"][-1])
             (obs, state, action_mask), reward, done, info = envs.step(actions)
@@ -419,7 +397,7 @@ def main(
             storage["action_mask"].append(action_mask)
             # ---------
 
-        if algorithm_mode == "ops" and step < ops["pretraining_steps"] and ops["delay_training"]:
+        if cfg.algorithm_mode == "ops" and step < cfg.ops["pretraining_steps"] and cfg.ops["delay_training"]:
             continue
 
         loss = _compute_loss(model, storage)
@@ -428,7 +406,7 @@ def main(
         #     loss += _compute_laac_loss(model, storage)
         if step %1000==0:  
             scalar_loss = loss.item() 
-            print("Step:",step," Total steps ",total_steps,"And loss",scalar_loss)
+            print("Step:",step," Total steps ",cfg.total_steps,"And loss",scalar_loss)
         optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
