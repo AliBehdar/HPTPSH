@@ -107,7 +107,7 @@ def compute_clusters(rb, agent_count, batch_size, clusters, lr, epochs, z_featur
         train_epoch_loss = fit(model, dataloader)
         train_loss.append(train_epoch_loss)
 
-    ##print(f"Train Loss: {train_epoch_loss:.6f}")
+    print(f"Train Loss: {train_epoch_loss:.6f}")
     x = torch.eye(agent_count)
 
     with torch.no_grad():

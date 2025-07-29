@@ -6,7 +6,6 @@ import rware
 from torch.distributions import Categorical
 from gymnasium.spaces.utils import flatdim
 
-
 class MultiCategorical:
     def __init__(self, categoricals):
         self.categoricals = categoricals
@@ -64,20 +63,9 @@ class MultiAgentFCNetwork(nn.Module):
             self.independent.append(self._make_fc(dims))
 
     def forward(self, inputs, laac_indices):
-        #print(inputs)
-        ##print(inputs[0].shape)
-        #assert inputs[0].dim() == 2
-        #out2 = self.forward2(inputs, laac_indices)
-           
-        # ───── DEBUGGING INSTRUMENTATION ─────
-        #print(">>> [DEBUG] MultiAgentFCNetwork.forward received inputs:")
-        #print("    type(inputs):", type(inputs))
-        #try:
-            #for i, inp in enumerate(inputs):
-                #print(f"    inputs[{i}] → type={type(inp)}, ",f"{'tensor' if isinstance(inp, torch.Tensor) else 'not-tensor'}, ",f"shape={inp.shape if isinstance(inp, torch.Tensor) else 'N/A'}")
-        #except Exception as e:
-            #rint("    Could not iterate inputs:", e)
-
+        # print(inputs[0].shape)
+        # assert inputs[0].dim() == 2
+        # out2 = self.forward2(inputs, laac_indices)
         inputs = torch.stack(inputs)
         out = torch.stack([net(inputs) for net in self.independent])
         if inputs[0].dim() == 3:
@@ -142,7 +130,7 @@ class Policy(nn.Module):
         num_outputs = [asp.n for asp in action_space]
 
         self.laac_params = nn.Parameter(torch.ones(self.n_agents-1, laac_size))
-        ##print(self)
+        print(self)
 
     def sample_laac(self, batch_size):
         sample = Categorical(logits=self.laac_params).sample([batch_size])
@@ -165,18 +153,6 @@ class Policy(nn.Module):
         return dist
 
     def act(self, inputs, action_mask=None):
-                # ───── DEBUGGING INSTRUMENTATION ─────
-        #(">>> [DEBUG] Policy.act called with inputs:")
-        #print("    type(inputs):", type(inputs))
-        #if isinstance(inputs, (list, tuple)):
-       #    print("    len(inputs):", len(inputs))
-       #     for i, inp in enumerate(inputs):
-        #        print(f"    inputs[{i}] → type={type(inp)}, ",
-        #              f"{'tensor' if isinstance(inp, torch.Tensor) else 'not-tensor'}, ",
-        #              f"shape={inp.shape if isinstance(inp, torch.Tensor) else 'N/A'}")
-        #print(">>> [DEBUG] Policy.act action_mask:", action_mask)
-        # ───────────────────────────────────────
-
         actor_features = self.actor(inputs, self.laac_sample)
         dist = self.get_dist(actor_features, action_mask)
         action = dist.sample()
@@ -247,7 +223,7 @@ class LinearVAE(nn.Module):
         
     def forward(self, x, xp):
         # encoding
-        # x, _ = self.gru(x)
+#         x, _ = self.gru(x)
         x = self.encoder(x)
         
         mu = x[: , :self.features]

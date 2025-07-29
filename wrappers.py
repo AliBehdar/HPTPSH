@@ -1,84 +1,96 @@
 """
 A collection of environment wrappers for multi-agent environments
 """
-import numpy as np
 from collections import deque
 from time import perf_counter
 import rware
+import numpy as np
 from gymnasium import ObservationWrapper, spaces
 import gymnasium as gym
 from gymnasium.wrappers import RecordEpisodeStatistics, RecordVideo
 
-
 class RecordEpisodeStatistics(gym.Wrapper):
-    """Multi-agent version of RecordEpisodeStatistics."""
+    """ Multi-agent version of RecordEpisodeStatistics gym wrapper"""
 
     def __init__(self, env, deque_size=100):
         super().__init__(env)
-        # Infer number of agents from the wrapped env:
         try:
             n_agents = len(env.observation_space)
         except TypeError:
             n_agents = getattr(env, "n_agents", 1)
         self.n_agents = n_agents
 
-        # Queues to hold recent episode stats
+        self.t0 = perf_counter()
+        self.episode_reward = np.zeros(self.n_agents, dtype=np.float64)
+        self.episode_length = 0
         self.reward_queue = deque(maxlen=deque_size)
         self.length_queue = deque(maxlen=deque_size)
 
-        # Initialize counters
-        self.episode_reward = np.zeros(self.n_agents, dtype=np.float64)
-        self.episode_length = 0
-        self.t0 = perf_counter()
-
     def reset(self, **kwargs):
-        """Reset env and episode stats."""
-        #obs, info = super().reset(**kwargs)
-        obs ,info = super().reset(**kwargs)
-        #print("This is obs and info from reset funcion in wappers line 38",obs,info)
-        obs=obs[0] if isinstance(obs,(tuple,list)) else obs
-        # Reset counters
+        observation = super().reset(**kwargs)
+        #self.episode_reward = 0
         self.episode_reward[:] = 0.0
         self.episode_length = 0
         self.t0 = perf_counter()
-        return obs ,info
 
+        return observation
+    
     def step(self, action):
-        """Step through env, track multi-agent episode stats, and return 5-tuple."""
         out = super().step(action)
-        # Pull off the first five elements (obs, rew, terminated, truncated, info)
-        if len(out) >= 5:
-            obs, rew, terminated, truncated, info = out[:5]
+        # unpack 5-tuple vs. 4-tuple
+        if len(out) == 5:
+            obs, rew, terminated, truncated, info = out
         else:
-            # Fallback for old 4-tuple: (obs, rew, done, info)
             obs, rew, done4, info = out
-            terminated = ([done4] * self.n_agents) if isinstance(done4, bool) else list(done4)
-            truncated  = [False] * len(terminated)
+            terminated = ([done4] * self.n_agents
+                          if isinstance(done4, bool)
+                          else list(done4))
+            truncated  = [False] * self.n_agents
 
-        # Always make these into lists
+        # ensure lists
         if not isinstance(terminated, (list, tuple)):
             terminated = [terminated]
-        if not isinstance(truncated,  (list, tuple)):
-            truncated  = [truncated]
+        if not isinstance(truncated, (list, tuple)):
+            truncated = [truncated]
 
         done_list = [t or tr for t, tr in zip(terminated, truncated)]
 
-        # Accumulate rewards & lengths
+        # accumulate rewards and length
         rew_list = rew.tolist() if isinstance(rew, np.ndarray) else list(rew)
         for i, r in enumerate(rew_list):
             self.episode_reward[i] += float(r)
         self.episode_length += 1
 
+        # on episode end, log and reset counters
         if all(done_list):
             info["episode_reward"] = list(self.episode_reward)
             info["episode_length"] = self.episode_length
             info["episode_time"]   = perf_counter() - self.t0
             self.reward_queue.append(list(self.episode_reward))
             self.length_queue.append(self.episode_length)
+            # reset counters in-place
+            self.episode_reward[:] = 0.0
+            self.episode_length = 0
+            self.t0 = perf_counter()
 
-        return obs, rew, terminated, truncated, info
+        # return 4-tuple
+        rew_array = np.array(rew_list, dtype=np.float64)
+        return obs, rew_array, terminated, truncated, info
 
+    #def step(self, action):
+     #   observation, reward, done, info = super().step(action)
+      #  self.episode_reward += np.array(reward, dtype=np.float64)
+       # self.episode_length += 1
+        #ifl all(done):
+         #   info["episode_reward"] = self.episode_reward
+          #  for i, agent_reward in enumerate(self.episode_reward):
+           #     info[f"agent{i}/episode_reward"] = agent_reward
+            #info["episode_length"] = self.episode_length
+            #info["episode_time"] = perf_counter() - self.t0
 
+#            self.reward_queue.append(self.episode_reward)
+ #           self.length_queue.append(self.episode_length)
+  #      return observation, reward, done, info
 
 
 class FlattenObservation(ObservationWrapper):
@@ -113,32 +125,31 @@ class FlattenObservation(ObservationWrapper):
 
 class SquashDones(gym.Wrapper):
     """Wrapper that squashes multiple dones to a single one using all(dones)"""
-
     def step(self, action):
-        out = super().step(action)
-        # Normalize up to five elements
-        if len(out) >= 5:
-            obs, reward, terminated, truncated, info = out[:5]
+        out = self.env.step(action)
+        # unpack new vs old API:
+        if len(out) == 5:
+            obs, rew, terminated, truncated, info = out
         else:
-            obs, reward, done4, info = out
-            terminated = ([done4] * len(obs)) if isinstance(done4, bool) else list(done4)
-            truncated  = [False] * len(terminated)
+            # legacy 4‑tuple
+            obs, rew, done, info = out
+            terminated = ([done] 
+                          if isinstance(done, bool) 
+                          else list(done))
+            truncated = [False] * len(terminated)
 
-        # Coerce to lists
-        if not isinstance(terminated, (list, tuple)):
-            terminated = [terminated]
-        if not isinstance(truncated,  (list, tuple)):
-            truncated  = [truncated]
-
+        # now squash into one done flag per agent
         done_list = [t or tr for t, tr in zip(terminated, truncated)]
-        return obs, reward, terminated, truncated, info
+        # if you need a single bool (all agents finished):
+        done = all(done_list)
+
+        return obs, rew, terminated,truncated, info
 
 
 
 class GlobalizeReward(gym.RewardWrapper):
     def reward(self, reward):
         return self.n_agents * [sum(reward)]
-
 
 class StandardizeReward(gym.RewardWrapper):
     
@@ -174,62 +185,33 @@ class StandardizeReward(gym.RewardWrapper):
 class TimeLimit(gym.wrappers.TimeLimit):
     def __init__(self, env, max_episode_steps=None):
         
-        if max_episode_steps is None and getattr(env,"spec",None) is not None:
+       
+        if max_episode_steps is None and self.env.spec is not None:
             max_episode_steps = env.spec.max_episode_steps
         # if self.env.spec is not None:
         #     self.env.spec.max_episode_steps = max_episode_steps
         super().__init__(env,max_episode_steps)
-
         self._max_episode_steps = max_episode_steps
-        self._elapsed_steps = 0
+        self._elapsed_steps = None
 
-   # def step(self, action):
-    #    assert (
-     #       self._elapsed_steps is not None
-      #  ), "Cannot call env.step() before calling reset()"
-       # observation, reward, done, info= self.env.step(action)
-        #self._elapsed_steps += 1
-        #if self._elapsed_steps >= self._max_episode_steps:
-         #   info["TimeLimit.truncated"] = not all(done)
-          #  done = len(observation) * [True]
-       # return observation, reward, done, info
-    def step(self,action):
-        out=super().step(action)
+    def step(self, action):
+        assert (
+            self._elapsed_steps is not None
+        ), "Cannot call env.step() before calling reset()"
+        observation, reward, terminated, truncated, info = self.env.step(action)
+        done = terminated or truncated
+        self._elapsed_steps += 1
+        if self._elapsed_steps >= self._max_episode_steps:
+            info["TimeLimit.truncated"] = not all(done)
+            done = len(observation) * [True]
+        return observation, reward, done, info
 
-        if len(out) == 5:
-            obs, rew, terminated, truncated, info = out
-        else:
-            # old‐style 4‐tuple
-            obs, rew, done4, info = out
-            if isinstance(done4, bool):
-                n_agents = len(obs)
-                terminated = [done4] * n_agents
-            else:
-                terminated = list(done4)
-            truncated = [False] * len(terminated)
-        #print("This is out from step funcion in wappers and TimeLimite line 222 ",obs, rew, terminated, truncated, info)
-        return obs, rew, terminated, truncated, info
 
 class ClearInfo(gym.Wrapper):
-    #def step(self, action):
-    #    observation, reward, done, info = self.env.step(action)
-    #    return observation, reward, done, {}
     def step(self, action):
-        out = super().step(action)
-        # normalize to 5‐tuple
-        if len(out) == 5:
-            obs, rew, terminated, truncated, info = out
-        else:
-            obs, rew, done4, info = out
-            if isinstance(done4, bool):
-                n_agents = len(obs)
-                terminated = [done4] * n_agents
-            else:
-                terminated = list(done4)
-                truncated = [False] * len(terminated)
-        #print("This is obs, rew, terminated, truncated, info from step funcion in wappers and cleanInto line 242 ",obs, rew, terminated, truncated, info)
-        # always clear info
-        return obs, rew, terminated, truncated, {}
+        observation, reward, terminated, truncated, info = self.env.step(action)
+        done = terminated or truncated
+        return observation, reward, done, {}
 
 
 class SMACCompatible(gym.Wrapper):
@@ -238,7 +220,6 @@ class SMACCompatible(gym.Wrapper):
 
     def get_state(self):
         return [np.zeros(5) for x in self.observation_space]
-
 
 def Monitor(env, video_folder=None, episode_trigger=None, step_trigger=None,
             reset_keywords=(), info_keywords=(), override_existing=True):

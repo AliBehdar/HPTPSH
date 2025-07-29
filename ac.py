@@ -21,7 +21,7 @@ from sacred.observers import (
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecEnvWrapper
 from torch.utils.tensorboard import SummaryWriter
 import warnings
-warnings.filterwarnings("ignore", category=UserWarning, module="gymnasium.wrappers.rendering")
+#warnings.filterwarnings("ignore", category=UserWarning, module="gymnasium.wrappers.rendering")
 
 from model import Policy
 from ops_utils import compute_clusters, ops_ingredient
@@ -40,7 +40,7 @@ ex = Experiment(ingredients=[ops_ingredient])
 @ex.config
 def config(ops):
     name = "SePS release"
-    version = 2
+    version = 0
 
     env_name = None
     time_limit = None
@@ -93,22 +93,12 @@ class Torcherize(VecEnvWrapper):
 
     @ex.capture
     def reset(self, device, parallel_envs):
-        # handle both obs-only and (obs, info)
-        result = self.venv.reset()
-        if isinstance(result, tuple) and len(result) == 2:
-            obs, _inner_info = result
-        else:
-            obs, _inner_info = result, {}
-        #print("Torcherize.reset → obs:", obs, " inner_info:", _inner_info)
-
+        obs = self.venv.reset()
         obs = [torch.from_numpy(o).to(device) for o in obs]
         if self.observe_agent_id:
-            ids = torch.eye(len(obs)) \
-                .repeat_interleave(parallel_envs, 0) \
-                .view(len(obs), -1, len(obs))
+            ids = torch.eye(len(obs)).repeat_interleave(parallel_envs, 0).view(len(obs), -1, len(obs))
             obs = [torch.cat((ids[i], obs[i]), dim=1) for i in range(len(obs))]
         return obs
-
 
     def step_async(self, actions):
         actions = [a.squeeze().cpu().numpy() for a in actions]
@@ -118,7 +108,6 @@ class Torcherize(VecEnvWrapper):
     @ex.capture
     def step_wait(self, device, parallel_envs):
         obs, rew, done, info = self.venv.step_wait()
-        #print("this is obs, rew,done and info in Torcherize.step_wait line 112 ",obs,rew,done,info)
         obs = [torch.from_numpy(o).float().to(device) for o in obs]
         if self.observe_agent_id:
             ids = torch.eye(len(obs)).repeat_interleave(parallel_envs, 0).view(len(obs), -1, len(obs))
@@ -146,38 +135,22 @@ class SMACWrapper(VecEnvWrapper):
         return n_agents * [state]
 
     def reset(self):
-        # catch either obs-only or (obs, info)
-        result = self.venv.reset()
-        if isinstance(result, tuple) and len(result) == 2:
-            obs, inner_info = result
-        else:
-            obs, inner_info = result, {}
-
-        #print("SMACWrapper.reset → obs:", obs, " inner_info:", inner_info)
+        obs = self.venv.reset()
         state = self._make_state(len(obs))
         action_mask = self._make_action_mask(len(obs))
-        terminated = [False] * len(obs)
-        truncated  = [False] * len(obs)
+        return obs, state, action_mask
 
-        # Note: we now return the SMAC 5‑tuple, preserving inner_info if you ever need it 
-        return (obs, state, action_mask), None, terminated, truncated, inner_info
-
-
-    @ex.capture
-    def step_wait(self, device, parallel_envs):
-        # 1) Call the inner VecEnv’s step_wait (SMACWrapper now returns exactly 4 items)
-        (obs, state, action_mask), rew, done, info = self.venv.step_wait()
-
-        # 2) Rebuild state & action_mask for this wrapper (if necessary)
+    def step_wait(self):
+        obs, rew, done, info = self.venv.step_wait()
         state = self._make_state(len(obs))
         action_mask = self._make_action_mask(len(obs))
 
-        # 3) Convert observations to torch tensors
-        obs = [torch.from_numpy(o).float().to(device) for o in obs]
-
-        # 4) Return exactly what your main expects:
-        #    (obs, state, mask), reward, done, info
-        return (obs, state, action_mask), rew, done, info
+        return (
+            (obs, state, action_mask),
+            rew,
+            done,
+            info,
+        )
 
 
 @ex.capture
@@ -195,33 +168,22 @@ def _make_envs(env_name, env_args, parallel_envs, dummy_vecenv, wrappers, time_l
     def _env_thunk(seed):
         # print(env_args)
         env = gym.make(env_name,render_mode="rgb_array", **env_args)
-        obs_make_env, _ = env.reset(seed=seed)
-        #print("this is obs and info in line 178 which is not used some where else and I think this is a problem chatgpt",obs_make_env)
         if time_limit:
             env = TimeLimit(env, time_limit)
-        # ────── INSERT YOUR MONITOR HERE ──────  
-        # this will record episode stats (and videos, if you pass video_folder)
-        env = Monitor(
-           env,
-            video_folder="./videos",             # or None, if you only want stats
-            episode_trigger=lambda _: False      # record _every_ episode
-        )
-        # ──────────────────────────────────────
+        #env = Monitor(env, video_folder="./videos",episode_trigger=lambda _: False )
         for wrapper in wrappers:
             env = wrapper(env)
-        
+        #env.seed(seed)
         return env
 
     env_thunks = [partial(_env_thunk, seed + i) for i in range(parallel_envs)]
     if dummy_vecenv:
         envs = DummyVecEnv(env_thunks)
-        envs.buf_rews = np.zeros(
-            (parallel_envs, len(envs.observation_space)), dtype=np.float32
-        )
+        envs.buf_rews = np.zeros((parallel_envs, len(envs.observation_space)), dtype=np.float32)
     else:
         envs = SubprocVecEnv(env_thunks, start_method="fork")
     envs = Torcherize(envs)
-    #envs = SMACWrapper(envs)
+    envs = SMACWrapper(envs)
     return envs
 
 
@@ -305,7 +267,6 @@ def _compute_loss(model, storage, value_loss_coef, entropy_coef, central_v):
 
     loss = actor_loss + value_loss_coef * value_loss
     return loss
-
 @ex.automain
 def main(
     _run,
@@ -367,8 +328,8 @@ def main(
     optimizer = torch.optim.Adam(model.parameters(), lr, eps=optim_eps)
 
     # creates and initialises storage
-    obs= envs.reset()
-    #print("This is obs and  state, action_mask in line 350 of mean function",obs, state, action_mask)
+    obs, state, action_mask = envs.reset()
+
     storage = defaultdict(lambda: deque(maxlen=n_steps))
     storage["obs"] = deque(maxlen=n_steps + 1)
     storage["done"] = deque(maxlen=n_steps + 1)
@@ -379,9 +340,9 @@ def main(
     # for smac:
     storage["state"] = deque(maxlen=n_steps + 1)
     storage["action_mask"] = deque(maxlen=n_steps + 1)
-    #if central_v:
-    #    storage["state"].append(state)
-    #storage["action_mask"].append(action_mask)
+    if central_v:
+        storage["state"].append(state)
+    storage["action_mask"].append(action_mask)
     # ---------
 
     model.sample_laac(parallel_envs)
@@ -396,7 +357,7 @@ def main(
     for step in range(total_steps):
         
         if algorithm_mode == "ops" and step in [ops["delay"] + ops["pretraining_steps"]*(i+1) for i in range(ops["pretraining_times"])]:
-            ##print(f"Pretraining at step: {step}")
+            #print(f"Pretraining at step: {step}")
             cluster_idx = compute_clusters(rb.get_all_transitions(), agent_count)
             model.laac_sample = cluster_idx.repeat(parallel_envs, 1)
             pickle.dump(rb.get_all_transitions(), open(f"{env_name}.p", "wb"))
@@ -411,7 +372,7 @@ def main(
         for n_step in range(n_steps):
             with torch.no_grad():
                 actions = model.act(storage["obs"][-1], storage["action_mask"][-1])
-            obs, reward, done, info = envs.step(actions)
+            (obs, state, action_mask), reward, done, info = envs.step(actions)
 
             if use_proper_termination:
                 bad_done = torch.FloatTensor(
@@ -452,10 +413,10 @@ def main(
                     rb.add(**data)
 
             # for smac:
-            #if central_v:
-            #    storage["state"].append(state)
+            if central_v:
+                storage["state"].append(state)
 
-            #storage["action_mask"].append(action_mask)
+            storage["action_mask"].append(action_mask)
             # ---------
 
         if algorithm_mode == "ops" and step < ops["pretraining_steps"] and ops["delay_training"]:
@@ -465,7 +426,9 @@ def main(
 
         # if laac_mode=="laac" and step and step % laac_timestep == 0:
         #     loss += _compute_laac_loss(model, storage)
-
+        if step %1000==0:  
+            scalar_loss = loss.item() 
+            print("Step:",step," Total steps ",total_steps,"And loss",scalar_loss)
         optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
