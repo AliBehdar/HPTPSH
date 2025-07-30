@@ -152,33 +152,31 @@ class SMACWrapper(VecEnvWrapper):
         )
 
 
-@ex.capture
-def _compute_returns(storage, next_value, gamma):
+def _compute_returns(storage, next_value,cfg):
     returns = [next_value]
     for rew, done in zip(reversed(storage["rewards"]), reversed(storage["done"])):
-        ret = returns[0] * gamma + rew * (1 - done.unsqueeze(1))
+        ret = returns[0] * cfg.train.gamma + rew * (1 - done.unsqueeze(1))
         returns.insert(0, ret)
 
     return returns
 
 
-@ex.capture
-def _make_envs(env_name, env_args, parallel_envs, dummy_vecenv, wrappers, time_limit, seed):
-    def _env_thunk(seed):
+def _make_envs(env_name, env_args,cfg):
+    def _env_thunk():
         # print(env_args)
         env = gym.make(env_name,render_mode="rgb_array", **env_args)
-        if time_limit:
-            env = TimeLimit(env, time_limit)
+        if cfg.time_limit:
+            env = TimeLimit(env, cfg.time_limit)
         #env = Monitor(env, video_folder="./videos",episode_trigger=lambda _: False )
-        for wrapper in wrappers:
+        for wrapper in cfg.wrappers:
             env = wrapper(env)
         #env.seed(seed)
         return env
 
-    env_thunks = [partial(_env_thunk, seed + i) for i in range(parallel_envs)]
-    if dummy_vecenv:
+    env_thunks = [partial(_env_thunk, cfg.seed + i) for i in range(cfg.train.parallel_envs)]
+    if cfg.dummy_vecenv:
         envs = DummyVecEnv(env_thunks)
-        envs.buf_rews = np.zeros((parallel_envs, len(envs.observation_space)), dtype=np.float32)
+        envs.buf_rews = np.zeros((cfg.train.parallel_envs, len(envs.observation_space)), dtype=np.float32)
     else:
         envs = SubprocVecEnv(env_thunks, start_method="fork")
     envs = Torcherize(envs)
@@ -197,28 +195,17 @@ def _squash_info(info):
     return new_info
 
 
-@ex.capture
-def _log_progress(
-    infos,
-    prev_time,
-    step,
-    parallel_envs,
-    n_steps,
-    total_steps,
-    log_interval,
-    _log,
-    _run,
-):
+def _log_progress(infos,prev_time,step,_log,_run,cfg):
 
     elapsed = time.time() - prev_time
-    ups = log_interval / elapsed
-    fps = ups * parallel_envs * n_steps
+    ups = cfg.train.log_interval / elapsed
+    fps = ups * cfg.train.parallel_envs * cfg.train.n_steps
     mean_reward = sum(sum([ep["episode_reward"] for ep in infos]) / len(infos))
     battles_won = 100 * sum([ep.get("battle_won", 0) for ep in infos]) / len(infos)
 
-    _log.info(f"Updates {step}, Environment timesteps {parallel_envs* n_steps * step}")
+    _log.info(f"Updates {step}, Environment timesteps {cfg.train.parallel_envs* cfg.train.n_steps * step}")
     _log.info(
-        f"UPS: {ups:.1f}, FPS: {fps:.1f}, ({100*step/total_steps:.2f}% completed)"
+        f"UPS: {ups:.1f}, FPS: {fps:.1f}, ({100*step/cfg.train.total_steps:.2f}% completed)"
     )
 
     _log.info(f"Last {len(infos)} episodes with mean reward: {mean_reward:.3f}")
@@ -230,16 +217,15 @@ def _log_progress(
         _run.log_scalar(k, v, step)
 
 
-@ex.capture
-def _compute_loss(model, storage, value_loss_coef, entropy_coef, central_v):
+def _compute_loss(model, storage,cfg):
     with torch.no_grad():
-        next_value = model.get_value(storage["state" if central_v else "obs"][-1])
+        next_value = model.get_value(storage["state" if cfg.central_v else "obs"][-1])
     returns = _compute_returns(storage, next_value)
 
     input_obs = zip(*storage["obs"])
     input_obs = [torch.stack(o)[:-1] for o in input_obs]
 
-    if central_v:
+    if cfg.central_v:
         input_state = zip(*storage["state"])
         input_state = [torch.stack(s)[:-1] for s in input_state]
     else:
@@ -260,13 +246,13 @@ def _compute_loss(model, storage, value_loss_coef, entropy_coef, central_v):
 
     actor_loss = (
         -(action_log_probs * advantage.detach()).sum(dim=2).mean()
-        - entropy_coef * entropy
+        - cfg.train.entropy_coef * entropy
     )
     value_loss = (returns - values).pow(2).sum(dim=2).mean()
 
-    loss = actor_loss + value_loss_coef * value_loss
+    loss = actor_loss + cfg.train.value_loss_coef * value_loss
     return loss
-@ex.automain
+
 def main(cfg):
     torch.set_num_threads(1)
 
