@@ -268,9 +268,4 @@ def main(cfg):
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
         optimizer.step()
-
-    # df["agent"] = df["agent"].astype(int)
-    # df["timestep"] = df["timestep"].astype(int)
-    # df = df.set_index(["timestep", "agent"])
-
     envs.close()
