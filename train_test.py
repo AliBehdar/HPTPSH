@@ -10,103 +10,17 @@ from cpprb import ReplayBuffer, create_before_add_func, create_env_dict
 import gymnasium as gym
 import numpy as np
 import torch
-from sacred import Experiment
-from sacred.observers import (
-    FileStorageObserver,
-    MongoObserver,  # noqa
-    QueuedMongoObserver,
-    QueueObserver,
-)
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecEnvWrapper
+
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 from torch.utils.tensorboard import SummaryWriter
 
 from model import Policy
-from ops_utils import compute_clusters, ops_ingredient
+from ops_utils import compute_clusters, ops_ingredient,Torcherize
 from wrappers import *
+from wrappers import SMACWrapper
 import hydra
 
-ex = Experiment(ingredients=[ops_ingredient])
-# ex.captured_out_filter = apply_backspaces_and_linefeeds
-#ex.captured_out_filter = lambda captured_output: "Output capturing turned off."
-#ex.observers.append(FileStorageObserver('output/'))
-
-#logging.basicConfig(
-#    level=logging.INFO,
-#    format="(%(process)d) [%(levelname).1s] - (%(asctime)s) >> %(message)s",#
-#    datefmt="%m/%d %H:%M:%S",)
-
 @hydra.main(config_path="../conf", config_name="config")
-
-class Torcherize(VecEnvWrapper):
-    
-    def __init__(self, cfg,venv):
-        super().__init__(venv)
-        #self.venv.reset()
-        self.cfg=cfg
-        self.observe_agent_id = cfg.algorithm_mode == "snac-a"
-        if self.observe_agent_id:
-            agent_count = len(self.observation_space)
-            self.observation_space = gym.spaces.Tuple(tuple([gym.spaces.Box(low=-np.inf, high=np.inf, shape=((x.shape[0] + agent_count),), dtype=x.dtype) for x in self.observation_space]))
-
-    def reset(self):
-        obs = self.venv.reset()
-        obs = [torch.from_numpy(o).to(self.cfg.device) for o in obs]
-        if self.observe_agent_id:
-            ids = torch.eye(len(obs)).repeat_interleave(self.cfg.parallel_envs, 0).view(len(obs), -1, len(obs))
-            obs = [torch.cat((ids[i], obs[i]), dim=1) for i in range(len(obs))]
-        return obs
-
-    def step_async(self, actions):
-        actions = [a.squeeze().cpu().numpy() for a in actions]
-        actions = list(zip(*actions))
-        return self.venv.step_async(actions)
-
-    @ex.capture
-    def step_wait(self):
-        obs, rew, done, info = self.venv.step_wait()
-        obs = [torch.from_numpy(o).float().to(self.cfg.device) for o in obs]
-        if self.observe_agent_id:
-            ids = torch.eye(len(obs)).repeat_interleave(self.cfg.parallel_envs, 0).view(len(obs), -1, len(obs))
-            obs = [torch.cat((ids[i], obs[i]), dim=1) for i in range(len(obs))]
-
-        return (
-            obs,
-            torch.from_numpy(rew).float().to(self.cfg.device),
-            torch.from_numpy(done).float().to(self.cfg.device),
-            info,
-        )
-
-
-class SMACWrapper(VecEnvWrapper):
-    def _make_action_mask(self, n_agents):
-        action_mask = self.venv.env_method("get_avail_actions")
-        action_mask = [
-            torch.tensor([avail[i] for avail in action_mask]) for i in range(n_agents)
-        ]
-        return action_mask
-
-    def _make_state(self, n_agents):
-        state = self.venv.env_method("get_state")
-        state = torch.from_numpy(np.stack(state))
-        return n_agents * [state]
-
-    def reset(self):
-        obs = self.venv.reset()
-        state = self._make_state(len(obs))
-        action_mask = self._make_action_mask(len(obs))
-        return obs, state, action_mask
-
-    def step_wait(self):
-        obs, rew, done, info = self.venv.step_wait()
-        state = self._make_state(len(obs))
-        action_mask = self._make_action_mask(len(obs))
-
-        return (
-            (obs, state, action_mask),
-            rew,
-            done,
-            info,
-        )
 
 
 def _compute_returns(storage, next_value,cfg):

@@ -1,6 +1,6 @@
 import pickle
 import tempfile
-
+import gymnasium as gym
 import numpy as np
 import torch
 from cpprb import ReplayBuffer, create_before_add_func, create_env_dict
@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
-
+from stable_baselines3.common.vec_env import VecEnvWrapper
 from model import LinearVAE
 
 
@@ -143,3 +143,41 @@ def find_optimal_cluster_number(X):
 
     max_key = min(scores, key=lambda k: scores[k])
     return max_key
+class Torcherize(VecEnvWrapper):
+    
+    def __init__(self, cfg,venv):
+        super().__init__(venv)
+        #self.venv.reset()
+        self.cfg=cfg
+        self.observe_agent_id = cfg.algorithm_mode == "snac-a"
+        if self.observe_agent_id:
+            agent_count = len(self.observation_space)
+            self.observation_space = gym.spaces.Tuple(tuple([gym.spaces.Box(low=-np.inf, high=np.inf, shape=((x.shape[0] + agent_count),), dtype=x.dtype) for x in self.observation_space]))
+
+    def reset(self):
+        obs = self.venv.reset()
+        obs = [torch.from_numpy(o).to(self.cfg.device) for o in obs]
+        if self.observe_agent_id:
+            ids = torch.eye(len(obs)).repeat_interleave(self.cfg.parallel_envs, 0).view(len(obs), -1, len(obs))
+            obs = [torch.cat((ids[i], obs[i]), dim=1) for i in range(len(obs))]
+        return obs
+
+    def step_async(self, actions):
+        actions = [a.squeeze().cpu().numpy() for a in actions]
+        actions = list(zip(*actions))
+        return self.venv.step_async(actions)
+
+    def step_wait(self):
+        obs, rew, done, info = self.venv.step_wait()
+        obs = [torch.from_numpy(o).float().to(self.cfg.device) for o in obs]
+        if self.observe_agent_id:
+            ids = torch.eye(len(obs)).repeat_interleave(self.cfg.parallel_envs, 0).view(len(obs), -1, len(obs))
+            obs = [torch.cat((ids[i], obs[i]), dim=1) for i in range(len(obs))]
+
+        return (
+            obs,
+            torch.from_numpy(rew).float().to(self.cfg.device),
+            torch.from_numpy(done).float().to(self.cfg.device),
+            info,
+        )
+

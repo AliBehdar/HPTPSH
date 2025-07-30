@@ -3,11 +3,12 @@ A collection of environment wrappers for multi-agent environments
 """
 from collections import deque
 from time import perf_counter
-import rware
+import torch
 import numpy as np
 from gymnasium import ObservationWrapper, spaces
 import gymnasium as gym
 from gymnasium.wrappers import RecordEpisodeStatistics, RecordVideo
+from stable_baselines3.common.vec_env import VecEnvWrapper
 
 class RecordEpisodeStatistics(gym.Wrapper):
     """ Multi-agent version of RecordEpisodeStatistics gym wrapper"""
@@ -88,9 +89,6 @@ class RecordEpisodeStatistics(gym.Wrapper):
             #info["episode_length"] = self.episode_length
             #info["episode_time"] = perf_counter() - self.t0
 
-#            self.reward_queue.append(self.episode_reward)
- #           self.length_queue.append(self.episode_length)
-  #      return observation, reward, done, info
 
 
 class FlattenObservation(ObservationWrapper):
@@ -220,6 +218,37 @@ class SMACCompatible(gym.Wrapper):
 
     def get_state(self):
         return [np.zeros(5) for x in self.observation_space]
+
+class SMACWrapper(VecEnvWrapper):
+    def _make_action_mask(self, n_agents):
+        action_mask = self.venv.env_method("get_avail_actions")
+        action_mask = [
+            torch.tensor([avail[i] for avail in action_mask]) for i in range(n_agents)
+        ]
+        return action_mask
+
+    def _make_state(self, n_agents):
+        state = self.venv.env_method("get_state")
+        state = torch.from_numpy(np.stack(state))
+        return n_agents * [state]
+
+    def reset(self):
+        obs = self.venv.reset()
+        state = self._make_state(len(obs))
+        action_mask = self._make_action_mask(len(obs))
+        return obs, state, action_mask
+
+    def step_wait(self):
+        obs, rew, done, info = self.venv.step_wait()
+        state = self._make_state(len(obs))
+        action_mask = self._make_action_mask(len(obs))
+
+        return (
+            (obs, state, action_mask),
+            rew,
+            done,
+            info,
+        )
 
 def Monitor(env, video_folder=None, episode_trigger=None, step_trigger=None,
             reset_keywords=(), info_keywords=(), override_existing=True):
