@@ -4,10 +4,8 @@ import tempfile
 import numpy as np
 import torch
 from cpprb import ReplayBuffer, create_before_add_func, create_env_dict
-import rware
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score, davies_bouldin_score
-from sacred import Ingredient
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
@@ -16,39 +14,16 @@ import matplotlib.colors as mcolors
 
 from model import LinearVAE
 
-ops_ingredient = Ingredient("ops")
 
-@ops_ingredient.config
-def config():
-    ops_timestep = 100
-
-    delay = 0
-    pretraining_steps = 5000
-    pretraining_times = 1
-
-    batch_size = 128
-    clusters = None
-    lr = 3e-4
-    epochs = 10
-    z_features = 10
-
-    kl_weight = 0.0001
-    delay_training = False
-
-    human_selected_idx = None # like [0, 0, 0, 0, 1, 1, 1, 1] or None - only used for visualisation
-
-    encoder_in = ["agent"]
-    decoder_in = ["obs", "act"] # + "z"
-    reconstruct = ["next_obs", "rew"]
 
 class rbDataSet(Dataset):
-    @ops_ingredient.capture
-    def __init__(self, rb, encoder_in, decoder_in, reconstruct):
+    
+    def __init__(self, rb,cfg):
         self.rb = rb
         self.data = []
-        self.data.append(torch.cat([torch.from_numpy(self.rb[n]) for n in encoder_in], dim=1))
-        self.data.append(torch.cat([torch.from_numpy(self.rb[n]) for n in decoder_in], dim=1))
-        self.data.append(torch.cat([torch.from_numpy(self.rb[n]) for n in reconstruct], dim=1))
+        self.data.append(torch.cat([torch.from_numpy(self.rb[n]) for n in cfg.network.encoder_in], dim=1))
+        self.data.append(torch.cat([torch.from_numpy(self.rb[n]) for n in cfg.network.decoder_in], dim=1))
+        self.data.append(torch.cat([torch.from_numpy(self.rb[n]) for n in cfg.network.reconstruct], dim=1))
         
         ##print([x.shape for x in self.data])
     def __len__(self):
@@ -56,20 +31,20 @@ class rbDataSet(Dataset):
     def __getitem__(self, idx):
         return [x[idx, :] for x in self.data]
 
-@ops_ingredient.capture
-def compute_clusters(rb, agent_count, batch_size, clusters, lr, epochs, z_features, kl_weight, _log):
-    device = "cpu"
 
-    dataset = rbDataSet(rb)
+def compute_clusters(rb, agent_count,cfg,save_plot=False):
+    
+
+    dataset = rbDataSet(rb,cfg)
     
     input_size = dataset.data[0].shape[-1]
     extra_decoder_input = dataset.data[1].shape[-1]
     reconstruct_size = dataset.data[2].shape[-1]
     
-    model = LinearVAE(z_features, input_size, extra_decoder_input, reconstruct_size)
+    model = LinearVAE(cfg.z_features, input_size, extra_decoder_input, reconstruct_size)
     ##print(model)
-    model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    model.to(cfg.train.device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.train.lr)
 
     # criterion = nn.BCELoss(reduction='sum')
     criterion = nn.MSELoss(reduction="sum")
@@ -84,12 +59,12 @@ def compute_clusters(rb, agent_count, batch_size, clusters, lr, epochs, z_featur
         """
         BCE = bce_loss 
         KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-        return BCE + kl_weight*KLD
+        return BCE + cfg.train.kl_weight*KLD
 
     def fit(model, dataloader):
         model.train()
         running_loss = 0.0
-        for i, (encoder_in, decoder_in, y) in enumerate(dataloader):
+        for encoder_in, decoder_in, y in enumerate(dataloader):
             optimizer.zero_grad()
             reconstruction, mu, logvar = model(encoder_in, decoder_in)
             bce_loss = criterion(reconstruction, y)
@@ -100,10 +75,10 @@ def compute_clusters(rb, agent_count, batch_size, clusters, lr, epochs, z_featur
         train_loss = running_loss/len(dataloader.dataset)
         return train_loss
 
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    dataloader = DataLoader(dataset, batch_size=cfg.train.batch_size, shuffle=True)
 
     train_loss = []
-    for epoch in tqdm(range(epochs)):
+    for epoch in tqdm(range(cfg.train.epochs)):
         train_epoch_loss = fit(model, dataloader)
         train_loss.append(train_epoch_loss)
 
@@ -111,27 +86,23 @@ def compute_clusters(rb, agent_count, batch_size, clusters, lr, epochs, z_featur
     x = torch.eye(agent_count)
 
     with torch.no_grad():
-        z = model.encode(x)
-    z = z.to("cpu")
+        z = model.encode(x).cpu()
     z = z[:, :]
 
     if clusters is None:
         clusters = find_optimal_cluster_number(z)
-    _log.info(f"Creating {clusters} clusters.")
+    print(f"Creating {clusters} clusters.")
     # run k-means from scikit-learn
-    kmeans = KMeans(
-        n_clusters=clusters, init='k-means++',
-        n_init=10
-    )
+    kmeans = KMeans(n_clusters=clusters, init='k-means++',n_init=10)
     cluster_ids_x = kmeans.fit_predict(z) # predict labels
-    if z_features == 2:
-        plot_clusters(kmeans.cluster_centers_, z)
+    if cfg.train.z_features == 2:
+        plot_clusters(kmeans.cluster_centers_, z,cfg)
     return torch.from_numpy(cluster_ids_x).long()
 
-@ops_ingredient.capture
-def plot_clusters(cluster_centers, z, human_selected_idx, _run):
 
-    if human_selected_idx is None:
+def plot_clusters(cluster_centers, z,cfg):
+    plt.figure(figsize=(8, 6))
+    if cfg.network.human_selected_idx is None:
         plt.plot(z[:, 0], z[:, 1], 'o')
         plt.plot(cluster_centers[:, 0], cluster_centers[:, 1], 'x')
 
@@ -140,13 +111,19 @@ def plot_clusters(cluster_centers, z, human_selected_idx, _run):
 
     else:
         colors = 'bgrcmykw'
-        for i in range(len(human_selected_idx)):
-            plt.plot(z[i, 0], z[i, 1], 'o' + colors[human_selected_idx[i]])
+        for i in range(len(cfg.network.human_selected_idx)):
+            plt.plot(z[i, 0], z[i, 1], 'o' + colors[cfg.network.human_selected_idx[i]])
 
         plt.plot(cluster_centers[:, 0], cluster_centers[:, 1], 'x')
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmpfile:
-        plt.savefig(tmpfile, format="png") # File position is at the end of the file.
-        _run.add_artifact(tmpfile.name, f"cluster.png")
+    
+    plt.title("Cluster Visualization")
+    plt.xlabel("Z[0]")
+    plt.ylabel("Z[1]")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig("cluster_plot.png")
+    print("Cluster plot saved to cluster_plot.png")
+    plt.close()
     # plt.savefig("cluster.png")
 
 def find_optimal_cluster_number(X):

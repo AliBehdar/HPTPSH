@@ -34,51 +34,8 @@ ex = Experiment(ingredients=[ops_ingredient])
 #    level=logging.INFO,
 #    format="(%(process)d) [%(levelname).1s] - (%(asctime)s) >> %(message)s",#
 #    datefmt="%m/%d %H:%M:%S",)
+
 @hydra.main(config_path="../conf", config_name="config")
-
-def config(ops):
-    name = "SePS release"
-    version = 0
-
-    env_name = None
-    time_limit = None
-    env_args = {}
-
-    wrappers = (
-        RecordEpisodeStatistics,
-        SquashDones,
-        SMACCompatible,
-    )
-    dummy_vecenv = True
-
-    # everything below is update steps (not env steps!)
-    total_steps = int(10e6)
-    log_interval = int(2e3)
-    save_interval = int(1e6)
-    eval_interval = int(1e4)
-
-    architecture = {
-        "actor": [64, 64],
-        "critic": [64, 64],
-    }
-
-    lr = 3e-4
-    optim_eps = 0.00001
-
-    parallel_envs = 8
-    n_steps = 5
-    gamma = 0.99
-    entropy_coef = 0.01
-    value_loss_coef = 0.5
-    use_proper_termination = True
-    central_v = False
-
-    # 
-    algorithm_mode = "ops" # "ops", "iac", "snac", or "snac-a"
-
-    #
-    device = "cpu"
-
 
 class Torcherize(VecEnvWrapper):
     
@@ -322,7 +279,7 @@ def main(cfg):
         
         if cfg.train.algorithm_mode == "ops" and step in [cfg.train.delay + cfg.train.pretraining_steps*(i+1) for i in range(cfg.train.pretraining_times)]:
             #print(f"Pretraining at step: {step}")
-            cluster_idx = compute_clusters(rb.get_all_transitions(), agent_count)
+            cluster_idx = compute_clusters(rb.get_all_transitions(), agent_count,cfg)
             model.laac_sample = cluster_idx.repeat(cfg.train.parallel_envs, 1)
             pickle.dump(rb.get_all_transitions(), open(f"{cfg.env_name}.p", "wb"))
             cfg._log.info(model.laac_sample)

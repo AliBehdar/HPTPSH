@@ -2,7 +2,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import rware
 from torch.distributions import Categorical
 from gymnasium.spaces.utils import flatdim
 
