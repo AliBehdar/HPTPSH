@@ -1,28 +1,24 @@
-import logging
 import time
-from collections import deque
-from functools import partial
-from os import path
-from pathlib import Path
-from collections import defaultdict
-import pickle
-from cpprb import ReplayBuffer, create_before_add_func, create_env_dict
-import gymnasium as gym
-import numpy as np
 import torch
-
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
-from torch.utils.tensorboard import SummaryWriter
-
-from model import Policy
-from ops_utils import compute_clusters, ops_ingredient,Torcherize
-from wrappers import *
-from wrappers import SMACWrapper
 import hydra
+import pickle
+import logging
 
-@hydra.main(config_path="../conf", config_name="config")
+import numpy as np
+import gymnasium as gym
 
-
+from wrappers import *
+from pathlib import Path
+from model import Policy
+from functools import partial
+from wrappers import SMACWrapper
+from omegaconf import DictConfig
+from collections import deque,defaultdict
+from torch.utils.tensorboard import SummaryWriter
+from ops_utils import compute_clusters,Torcherize
+from cpprb import ReplayBuffer, create_before_add_func, create_env_dict
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
+   
 def _compute_returns(storage, next_value,cfg):
     returns = [next_value]
     for rew, done in zip(reversed(storage["rewards"]), reversed(storage["done"])):
@@ -31,11 +27,10 @@ def _compute_returns(storage, next_value,cfg):
 
     return returns
 
-
-def _make_envs(env_name, env_args,cfg):
+def _make_envs(cfg):
     def _env_thunk():
         # print(env_args)
-        env = gym.make(env_name,render_mode="rgb_array", **env_args)
+        env = gym.make(cfg.env_name,render_mode="rgb_array", **cfg.env_args)
         if cfg.time_limit:
             env = TimeLimit(env, cfg.time_limit)
         #env = Monitor(env, video_folder="./videos",episode_trigger=lambda _: False )
@@ -44,16 +39,15 @@ def _make_envs(env_name, env_args,cfg):
         #env.seed(seed)
         return env
 
-    env_thunks = [partial(_env_thunk, cfg.seed + i) for i in range(cfg.train.parallel_envs)]
+    env_thunks = [partial(_env_thunk) for i in range(cfg.train.parallel_envs)]
     if cfg.dummy_vecenv:
         envs = DummyVecEnv(env_thunks)
         envs.buf_rews = np.zeros((cfg.train.parallel_envs, len(envs.observation_space)), dtype=np.float32)
     else:
         envs = SubprocVecEnv(env_thunks, start_method="fork")
-    envs = Torcherize(envs)
-    envs = SMACWrapper(envs)
+    envs = Torcherize(envs,cfg)
+    envs = SMACWrapper(envs,cfg)
     return envs
-
 
 def _squash_info(info):
     info = [i for i in info if i]
@@ -65,33 +59,28 @@ def _squash_info(info):
         new_info[key] = mean
     return new_info
 
-
-def _log_progress(infos,prev_time,step,_log,_run,cfg):
-
+def _log_progress(infos, prev_time, step, cfg, log, writer):
     elapsed = time.time() - prev_time
     ups = cfg.train.log_interval / elapsed
     fps = ups * cfg.train.parallel_envs * cfg.train.n_steps
-    mean_reward = sum(sum([ep["episode_reward"] for ep in infos]) / len(infos))
-    battles_won = 100 * sum([ep.get("battle_won", 0) for ep in infos]) / len(infos)
+    mean_reward = np.mean([ep["episode_reward"] for ep in infos])
+    battles_won = 100 * np.mean([ep.get("battle_won", 0) for ep in infos])
 
-    _log.info(f"Updates {step}, Environment timesteps {cfg.train.parallel_envs* cfg.train.n_steps * step}")
-    _log.info(
-        f"UPS: {ups:.1f}, FPS: {fps:.1f}, ({100*step/cfg.train.total_steps:.2f}% completed)"
-    )
+    # Text logs go to Hydra’s logger
+    log.info(f"[Step {step:6d}] Timesteps: {cfg.train.parallel_envs * cfg.train.n_steps * step}")
+    log.info(f"UPS: {ups:.1f}, FPS: {fps:.1f}, {100*step/cfg.train.total_steps:.2f}% done")
+    log.info(f"Mean reward: {mean_reward:.3f}, Battles won: {battles_won:.1f}%")
+    log.info("-" * 50)
 
-    _log.info(f"Last {len(infos)} episodes with mean reward: {mean_reward:.3f}")
-    _log.info(f"Battles won: {battles_won:.1f}%")
-    _log.info("-------------------------------------------")
-
-    squashed_info = _squash_info(infos)
-    for k, v in squashed_info.items():
-        _run.log_scalar(k, v, step)
+    # Scalars go to TensorBoard
+    for k, v in _squash_info(infos).items():
+        writer.add_scalar(k, v, step)
 
 
 def _compute_loss(model, storage,cfg):
     with torch.no_grad():
         next_value = model.get_value(storage["state" if cfg.central_v else "obs"][-1])
-    returns = _compute_returns(storage, next_value)
+    returns = _compute_returns(storage, next_value,cfg)
 
     input_obs = zip(*storage["obs"])
     input_obs = [torch.stack(o)[:-1] for o in input_obs]
@@ -124,10 +113,19 @@ def _compute_loss(model, storage,cfg):
     loss = actor_loss + cfg.train.value_loss_coef * value_loss
     return loss
 
-def main(cfg):
+@hydra.main(version_base="1.1",config_path="../seps/conf", config_name="configs")
+def main(cfg: DictConfig):
+    
     torch.set_num_threads(1)
 
-    envs = _make_envs()
+    log = logging.getLogger(__name__)
+    log.info("Starting training run")
+
+    tb_dir = Path.cwd() / "tensorboard"
+    writer = SummaryWriter(log_dir=tb_dir)
+    
+
+    envs = _make_envs(cfg)
 
     agent_count = len(envs.observation_space)
     obs_size = envs.observation_space[0].shape
@@ -144,7 +142,7 @@ def main(cfg):
     rb = ReplayBuffer(int(agent_count * cfg.train.pretraining_steps * cfg.train.parallel_envs * cfg.train.n_steps), env_dict)
 
     # before_add = create_before_add_func(env)
-
+    print(1)
     state_size = envs.get_attr("state_size")[0] if cfg.central_v else None
     
     if cfg.train.algorithm_mode.startswith("snac"):
@@ -179,7 +177,9 @@ def main(cfg):
         storage["state"].append(state)
     storage["action_mask"].append(action_mask)
     # ---------
-
+    storage["actions"]     = deque(maxlen=cfg.train.n_steps)
+    storage["rewards"]     = deque(maxlen=cfg.train.n_steps)
+    storage["laac_rewards"] = torch.zeros(cfg.train.parallel_envs)
     model.sample_laac(cfg.train.parallel_envs)
     if cfg.train.algorithm_mode == "iac":
         model.laac_sample = torch.arange(len(envs.observation_space)).repeat(cfg.parallel_envs, 1)
@@ -195,12 +195,14 @@ def main(cfg):
             #print(f"Pretraining at step: {step}")
             cluster_idx = compute_clusters(rb.get_all_transitions(), agent_count,cfg)
             model.laac_sample = cluster_idx.repeat(cfg.train.parallel_envs, 1)
-            pickle.dump(rb.get_all_transitions(), open(f"{cfg.env_name}.p", "wb"))
-            cfg._log.info(model.laac_sample)
+            outdir = Path.cwd()
+            with open(Path(outdir) / f"{cfg.env_name}.p", "wb") as f:
+                pickle.dump(rb.get_all_transitions(), f)
+            
 
 
-        if step % cfg.train.log_interval == 0 and len(storage["info"]):
-            _log_progress(storage["info"], start_time, step)
+        if step % cfg.train.log_interval == 0 and storage["info"]:
+            _log_progress(storage["info"], start_time, step, cfg, log, writer)
             start_time = time.time()
             storage["info"].clear()
 
@@ -261,11 +263,15 @@ def main(cfg):
 
         # if laac_mode=="laac" and step and step % laac_timestep == 0:
         #     loss += _compute_laac_loss(model, storage)
-        if step %1000==0:  
-            scalar_loss = loss.item() 
-            print("Step:",step," Total steps ",cfg.train.total_steps,"And loss",scalar_loss)
+        #if step %1000==0:  
+            #scalar_loss = loss.item() 
+            #print("Step:",step," Total steps ",cfg.train.total_steps,"And loss",scalar_loss)
         optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
         optimizer.step()
     envs.close()
+    writer.close()
+
+if __name__=="__main__":
+    main()

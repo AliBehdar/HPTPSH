@@ -1,15 +1,19 @@
 
+version_base: 1 
 name : "SePS release"
-version : 0
 seed : 25
-env_name : None
-time_limit : None
+env_name : 'rware-tiny-4ag-v2'
 env_args : {}
+time_limit : 500
 wrappers : (RecordEpisodeStatistics,SquashDones,SMACCompatible,)
 dummy_vecenv : True
 central_v : False
 clusters : None
 
+hydra:
+  run:
+    dir: ./outputs/${now:%Y-%m-%d_%H-%M-%S}
+  output_subdir: tensorboard
 
 network:
   architecture : {"actor": [64, 64],"critic": [64, 64]}
