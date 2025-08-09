@@ -2,10 +2,9 @@
 version_base: 1 
 name : "SePS release"
 seed : 25
-env_name : 'rware-tiny-4ag-v2'
+env_name : "rware-tiny-4ag-v2"
 env_args : {}
 time_limit : 500
-wrappers : (RecordEpisodeStatistics,SquashDones,SMACCompatible,)
 dummy_vecenv : True
 central_v : False
 clusters : None

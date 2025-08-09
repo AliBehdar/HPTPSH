@@ -2,23 +2,32 @@ import time
 import torch
 import hydra
 import pickle
-import logging
 
+import logging
+import rware
 import numpy as np
 import gymnasium as gym
 
 from wrappers import *
 from pathlib import Path
 from model import Policy
+
 from functools import partial
+from cpprb import ReplayBuffer
 from wrappers import SMACWrapper
 from omegaconf import DictConfig
+
 from collections import deque,defaultdict
 from torch.utils.tensorboard import SummaryWriter
 from ops_utils import compute_clusters,Torcherize
-from cpprb import ReplayBuffer, create_before_add_func, create_env_dict
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
-   
+
+wrappers = (
+        RecordEpisodeStatistics,
+        SquashDones,
+        SMACCompatible,
+    )
+
 def _compute_returns(storage, next_value,cfg):
     returns = [next_value]
     for rew, done in zip(reversed(storage["rewards"]), reversed(storage["done"])):
@@ -34,9 +43,9 @@ def _make_envs(cfg):
         if cfg.time_limit:
             env = TimeLimit(env, cfg.time_limit)
         #env = Monitor(env, video_folder="./videos",episode_trigger=lambda _: False )
-        for wrapper in cfg.wrappers:
+        for wrapper in wrappers:
             env = wrapper(env)
-        #env.seed(seed)
+
         return env
 
     env_thunks = [partial(_env_thunk) for i in range(cfg.train.parallel_envs)]
@@ -46,7 +55,7 @@ def _make_envs(cfg):
     else:
         envs = SubprocVecEnv(env_thunks, start_method="fork")
     envs = Torcherize(envs,cfg)
-    envs = SMACWrapper(envs,cfg)
+    envs = SMACWrapper(envs)
     return envs
 
 def _squash_info(info):
@@ -128,9 +137,12 @@ def main(cfg: DictConfig):
     envs = _make_envs(cfg)
 
     agent_count = len(envs.observation_space)
+    print(agent_count)
     obs_size = envs.observation_space[0].shape
+    print(obs_size)
     act_size = envs.action_space[0].n
-
+    print(act_size)
+    print("tessssssssssssssssssssssssssssssssssssstttttttttttttttttttttttttttttt passssssssssssss")
     env_dict = {
         "obs": {"shape": obs_size, "dtype": np.float32},
         "rew": {"shape": 1, "dtype": np.float32},
@@ -142,7 +154,7 @@ def main(cfg: DictConfig):
     rb = ReplayBuffer(int(agent_count * cfg.train.pretraining_steps * cfg.train.parallel_envs * cfg.train.n_steps), env_dict)
 
     # before_add = create_before_add_func(env)
-    print(1)
+
     state_size = envs.get_attr("state_size")[0] if cfg.central_v else None
     
     if cfg.train.algorithm_mode.startswith("snac"):

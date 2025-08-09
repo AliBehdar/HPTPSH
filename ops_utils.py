@@ -145,11 +145,11 @@ def find_optimal_cluster_number(X):
     return max_key
 class Torcherize(VecEnvWrapper):
     
-    def __init__(self, cfg,venv):
+    def __init__(self,venv, cfg):
         super().__init__(venv)
         #self.venv.reset()
         self.cfg=cfg
-        self.observe_agent_id = cfg.algorithm_mode == "snac-a"
+        self.observe_agent_id = self.cfg.train.algorithm_mode == "snac-a"
         if self.observe_agent_id:
             agent_count = len(self.observation_space)
             self.observation_space = gym.spaces.Tuple(tuple([gym.spaces.Box(low=-np.inf, high=np.inf, shape=((x.shape[0] + agent_count),), dtype=x.dtype) for x in self.observation_space]))

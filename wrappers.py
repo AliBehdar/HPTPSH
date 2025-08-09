@@ -220,6 +220,7 @@ class SMACCompatible(gym.Wrapper):
         return [np.zeros(5) for x in self.observation_space]
 
 class SMACWrapper(VecEnvWrapper):
+    
     def _make_action_mask(self, n_agents):
         action_mask = self.venv.env_method("get_avail_actions")
         action_mask = [
@@ -242,13 +243,7 @@ class SMACWrapper(VecEnvWrapper):
         obs, rew, done, info = self.venv.step_wait()
         state = self._make_state(len(obs))
         action_mask = self._make_action_mask(len(obs))
-
-        return (
-            (obs, state, action_mask),
-            rew,
-            done,
-            info,
-        )
+        return ((obs, state, action_mask),rew,done,info,)
 
 def Monitor(env, video_folder=None, episode_trigger=None, step_trigger=None,
             reset_keywords=(), info_keywords=(), override_existing=True):
