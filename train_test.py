@@ -137,12 +137,9 @@ def main(cfg: DictConfig):
     envs = _make_envs(cfg)
 
     agent_count = len(envs.observation_space)
-    print(agent_count)
     obs_size = envs.observation_space[0].shape
-    print(obs_size)
     act_size = envs.action_space[0].n
-    print(act_size)
-    print("tessssssssssssssssssssssssssssssssssssstttttttttttttttttttttttttttttt passssssssssssss")
+
     env_dict = {
         "obs": {"shape": obs_size, "dtype": np.float32},
         "rew": {"shape": 1, "dtype": np.float32},
@@ -156,14 +153,14 @@ def main(cfg: DictConfig):
     # before_add = create_before_add_func(env)
 
     state_size = envs.get_attr("state_size")[0] if cfg.central_v else None
-    
+    clusters = None
     if cfg.train.algorithm_mode.startswith("snac"):
         model_count = 1
     elif cfg.train.algorithm_mode == "iac":
         model_count = len(envs.observation_space)
     elif cfg.train.algorithm_mode == "ops":
-        if cfg.clusters:
-            model_count = cfg.clusters
+        if clusters:
+            model_count = clusters
         else:
             model_count = min(10, len(envs.observation_space))
 
@@ -218,7 +215,7 @@ def main(cfg: DictConfig):
             start_time = time.time()
             storage["info"].clear()
 
-        for n_step in range(cfg.n_steps):
+        for n_step in range(cfg.train.n_steps):
             with torch.no_grad():
                 actions = model.act(storage["obs"][-1], storage["action_mask"][-1])
             (obs, state, action_mask), reward, done, info = envs.step(actions)

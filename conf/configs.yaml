@@ -31,16 +31,16 @@ train:
   epochs : 10
   z_features : 10
   algorithm_mode : "ops" # "ops", "iac", "snac", or "snac-a"
-  device : "cpu"
+  device : cpu
   ops_timestep : 100
   delay : 0
   pretraining_steps : 5000
   pretraining_times : 1
   batch_size : 128
-  total_steps : int(10e6)
-  log_interval : int(2e3)
-  save_interval : int(1e6)
-  eval_interval : int(1e4)
+  total_steps : 10000000
+  log_interval : 20000
+  save_interval : 1000000
+  eval_interval : 10000
   entropy_coef : 0.01
   value_loss_coef : 0.5
   use_proper_termination : True

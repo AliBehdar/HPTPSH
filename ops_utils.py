@@ -82,7 +82,7 @@ def compute_clusters(rb, agent_count,cfg,save_plot=False):
         train_epoch_loss = fit(model, dataloader)
         train_loss.append(train_epoch_loss)
 
-    print(f"Train Loss: {train_epoch_loss:.6f}")
+    #print(f"Train Loss: {train_epoch_loss:.6f}")
     x = torch.eye(agent_count)
 
     with torch.no_grad():
@@ -91,7 +91,7 @@ def compute_clusters(rb, agent_count,cfg,save_plot=False):
 
     if clusters is None:
         clusters = find_optimal_cluster_number(z)
-    print(f"Creating {clusters} clusters.")
+    #print(f"Creating {clusters} clusters.")
     # run k-means from scikit-learn
     kmeans = KMeans(n_clusters=clusters, init='k-means++',n_init=10)
     cluster_ids_x = kmeans.fit_predict(z) # predict labels
@@ -122,7 +122,7 @@ def plot_clusters(cluster_centers, z,cfg):
     plt.grid(True)
     plt.tight_layout()
     plt.savefig("cluster_plot.png")
-    print("Cluster plot saved to cluster_plot.png")
+    #print("Cluster plot saved to cluster_plot.png")
     plt.close()
     # plt.savefig("cluster.png")
 
@@ -156,7 +156,7 @@ class Torcherize(VecEnvWrapper):
 
     def reset(self):
         obs = self.venv.reset()
-        obs = [torch.from_numpy(o).to(self.cfg.device) for o in obs]
+        obs = [torch.from_numpy(o).to(self.cfg.train.device) for o in obs]
         if self.observe_agent_id:
             ids = torch.eye(len(obs)).repeat_interleave(self.cfg.parallel_envs, 0).view(len(obs), -1, len(obs))
             obs = [torch.cat((ids[i], obs[i]), dim=1) for i in range(len(obs))]
@@ -169,15 +169,15 @@ class Torcherize(VecEnvWrapper):
 
     def step_wait(self):
         obs, rew, done, info = self.venv.step_wait()
-        obs = [torch.from_numpy(o).float().to(self.cfg.device) for o in obs]
+        obs = [torch.from_numpy(o).float().to(self.cfg.train.device) for o in obs]
         if self.observe_agent_id:
             ids = torch.eye(len(obs)).repeat_interleave(self.cfg.parallel_envs, 0).view(len(obs), -1, len(obs))
             obs = [torch.cat((ids[i], obs[i]), dim=1) for i in range(len(obs))]
 
         return (
             obs,
-            torch.from_numpy(rew).float().to(self.cfg.device),
-            torch.from_numpy(done).float().to(self.cfg.device),
+            torch.from_numpy(rew).float().to(self.cfg.train.device),
+            torch.from_numpy(done).float().to(self.cfg.train.device),
             info,
         )
 
