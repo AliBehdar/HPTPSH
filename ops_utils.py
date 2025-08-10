@@ -32,7 +32,7 @@ class rbDataSet(Dataset):
         return [x[idx, :] for x in self.data]
 
 
-def compute_clusters(rb, agent_count,cfg,save_plot=False):
+def compute_clusters(rb, agent_count,cfg,clusters=None,save_plot=False):
     
 
     dataset = rbDataSet(rb,cfg)
@@ -41,7 +41,7 @@ def compute_clusters(rb, agent_count,cfg,save_plot=False):
     extra_decoder_input = dataset.data[1].shape[-1]
     reconstruct_size = dataset.data[2].shape[-1]
     
-    model = LinearVAE(cfg.z_features, input_size, extra_decoder_input, reconstruct_size)
+    model = LinearVAE(cfg.train.z_features, input_size, extra_decoder_input, reconstruct_size)
     ##print(model)
     model.to(cfg.train.device)
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.train.lr)
@@ -64,7 +64,7 @@ def compute_clusters(rb, agent_count,cfg,save_plot=False):
     def fit(model, dataloader):
         model.train()
         running_loss = 0.0
-        for encoder_in, decoder_in, y in enumerate(dataloader):
+        for encoder_in, decoder_in, y in dataloader:
             optimizer.zero_grad()
             reconstruction, mu, logvar = model(encoder_in, decoder_in)
             bce_loss = criterion(reconstruction, y)

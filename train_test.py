@@ -39,7 +39,7 @@ def _compute_returns(storage, next_value,cfg):
 def _make_envs(cfg):
     def _env_thunk():
         # print(env_args)
-        env = gym.make(cfg.env_name,render_mode="rgb_array", **cfg.env_args)
+        env = gym.make(cfg.env_name,render_mode="rgb_array",disable_env_checker=True, **cfg.env_args)
         if cfg.time_limit:
             env = TimeLimit(env, cfg.time_limit)
         #env = Monitor(env, video_folder="./videos",episode_trigger=lambda _: False )
@@ -188,7 +188,7 @@ def main(cfg: DictConfig):
     # ---------
     storage["actions"]     = deque(maxlen=cfg.train.n_steps)
     storage["rewards"]     = deque(maxlen=cfg.train.n_steps)
-    storage["laac_rewards"] = torch.zeros(cfg.train.parallel_envs)
+    #storage["laac_rewards"] = torch.zeros(cfg.train.parallel_envs)
     model.sample_laac(cfg.train.parallel_envs)
     if cfg.train.algorithm_mode == "iac":
         model.laac_sample = torch.arange(len(envs.observation_space)).repeat(cfg.parallel_envs, 1)
@@ -268,7 +268,7 @@ def main(cfg: DictConfig):
         if cfg.train.algorithm_mode == "ops" and step < cfg.train.pretraining_steps and cfg.train.delay_training:
             continue
 
-        loss = _compute_loss(model, storage)
+        loss = _compute_loss(model, storage,cfg)
 
         # if laac_mode=="laac" and step and step % laac_timestep == 0:
         #     loss += _compute_laac_loss(model, storage)

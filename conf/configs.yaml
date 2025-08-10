@@ -11,8 +11,10 @@ clusters : None
 
 hydra:
   run:
-    dir: ./outputs/${now:%Y-%m-%d_%H-%M-%S}
+    dir: ./outputs/${now:%Y-%m-%d}
   output_subdir: tensorboard
+  job:
+    chdir: true
 
 network:
   architecture : {"actor": [64, 64],"critic": [64, 64]}

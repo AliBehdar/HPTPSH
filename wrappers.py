@@ -220,11 +220,11 @@ class SMACCompatible(gym.Wrapper):
         return [np.zeros(5) for x in self.observation_space]
 
 class SMACWrapper(VecEnvWrapper):
-    
     def _make_action_mask(self, n_agents):
         action_mask = self.venv.env_method("get_avail_actions")
+        #print("this is action_mask"action_mask)
         action_mask = [
-            torch.tensor([avail[i] for avail in action_mask]) for i in range(n_agents)
+            torch.tensor(np.array([avail[i] for avail in action_mask])) for i in range(n_agents)#dghsgh
         ]
         return action_mask
 
