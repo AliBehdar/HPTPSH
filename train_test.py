@@ -19,7 +19,7 @@ from omegaconf import DictConfig
 
 from collections import deque,defaultdict
 from torch.utils.tensorboard import SummaryWriter
-from ops_utils import compute_clusters,Torcherize
+from ops_utils import compute_clusters,Torcherize,plot_training
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
 wrappers = (
@@ -198,6 +198,12 @@ def main(cfg: DictConfig):
         # print(model.laac_sample)
 
     start_time = time.time()
+    reward_history = []
+    loss_history = []
+    interval_losses = []
+    best_mean_reward = float('-inf')
+    patience = 10
+    plot_dir = Path.cwd() / "plots" 
     for step in range(cfg.train.total_steps):
         
         if cfg.train.algorithm_mode == "ops" and step in [cfg.train.delay + cfg.train.pretraining_steps*(i+1) for i in range(cfg.train.pretraining_times)]:
@@ -211,9 +217,15 @@ def main(cfg: DictConfig):
 
 
         if step % cfg.train.log_interval == 0 and storage["info"]:
-            _log_progress(storage["info"], start_time, step, cfg, log, writer)
-            start_time = time.time()
-            storage["info"].clear()
+            mean_reward=_log_progress(storage["info"], start_time, step, cfg, log, writer)
+            if interval_losses :
+                mean_loss= np.mean(interval_losses)
+                writer.add_scalar("train/loss",mean_loss,step)
+                loss_history.append(mean_loss)
+            reward_history.append(mean_reward)
+            interval_losses=[]
+
+
 
         for n_step in range(cfg.train.n_steps):
             with torch.no_grad():
@@ -272,9 +284,23 @@ def main(cfg: DictConfig):
 
         # if laac_mode=="laac" and step and step % laac_timestep == 0:
         #     loss += _compute_laac_loss(model, storage)
-        #if step %1000==0:  
-            #scalar_loss = loss.item() 
-            #print("Step:",step," Total steps ",cfg.train.total_steps,"And loss",scalar_loss)
+        if step %1000==0:  
+            scalar_loss = loss.item() 
+            print("Step:",step," Total steps ",cfg.train.total_steps,"And loss",scalar_loss)
+            #if reward_history and loss_history and step % 1000 == 0:
+            plot_training(cfg,reward_history, loss_history, step, plot_dir)
+                    # Early stopping check
+        if mean_reward > best_mean_reward:
+            best_mean_reward=mean_reward
+            current_patience = patience
+        else:
+            current_patience -=1
+            if current_patience <=0:
+                log.info("Early stopping triggered")
+                break
+
+        start_time = time.time()
+        storage["info"].clear()
         optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)

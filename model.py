@@ -129,7 +129,7 @@ class Policy(nn.Module):
         num_outputs = [asp.n for asp in action_space]
 
         self.laac_params = nn.Parameter(torch.ones(self.n_agents-1, laac_size))
-        #print(self)
+        print(self)
 
     def sample_laac(self, batch_size):
         sample = Categorical(logits=self.laac_params).sample([batch_size])

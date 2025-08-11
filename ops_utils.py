@@ -2,7 +2,7 @@ import pickle
 import tempfile
 import gymnasium as gym
 import numpy as np
-import torch
+import torch , os 
 from cpprb import ReplayBuffer, create_before_add_func, create_env_dict
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score, davies_bouldin_score
@@ -122,10 +122,31 @@ def plot_clusters(cluster_centers, z,cfg):
     plt.grid(True)
     plt.tight_layout()
     plt.savefig("cluster_plot.png")
-    #print("Cluster plot saved to cluster_plot.png")
+    print("Cluster plot saved to cluster_plot.png")
     plt.close()
-    # plt.savefig("cluster.png")
+    plt.savefig("cluster.png")
 
+def plot_training(cfg,reward_history, loss_history, step, plot_dir):
+    
+    steps = np.arange(len(reward_history)) * cfg.train.log_interval
+    fig, ax1 = plt.subplots()
+
+    ax1.set_xlabel('Update Steps')
+    ax1.set_ylabel('Mean Reward', color='tab:blue')
+    ax1.plot(steps, reward_history, color='tab:blue')
+    ax1.tick_params(axis='y', labelcolor='tab:blue')
+
+    ax2 = ax1.twinx()
+    ax2.set_ylabel('Mean Loss', color='tab:red')
+    ax2.plot(steps, loss_history, color='tab:red')
+    ax2.tick_params(axis='y', labelcolor='tab:red')
+
+    fig.tight_layout()
+    plt.title(f'Training Progress: Reward and Loss (Step {step})')
+    os.makedirs(plot_dir, exist_ok=True)  # Create plots directory if it doesn't exist
+    plt.savefig(os.path.join(plot_dir, f"training_plot_step_{step}.png"))
+    plt.close()
+    
 def find_optimal_cluster_number(X):
 
     range_n_clusters = list(range(2, X.shape[0]))
