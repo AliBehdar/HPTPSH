@@ -127,24 +127,39 @@ def plot_clusters(cluster_centers, z,cfg):
     plt.savefig("cluster.png")
 
 def plot_training(cfg,reward_history, loss_history, step, plot_dir):
-    
-    steps = np.arange(len(reward_history)) * cfg.train.log_interval
-    fig, ax1 = plt.subplots()
 
+    steps = np.arange(len(reward_history)) * cfg.train.log_interval
+    
+    # Create figure and axis
+    fig, ax1 = plt.subplots(figsize=(10, 6))  # Increased figure size for clarity
+
+    # Plot Mean Reward on left y-axis
     ax1.set_xlabel('Update Steps')
     ax1.set_ylabel('Mean Reward', color='tab:blue')
-    ax1.plot(steps, reward_history, color='tab:blue')
+    ax1.plot(steps, reward_history, color='tab:blue', label='Mean Reward', linewidth=2)
     ax1.tick_params(axis='y', labelcolor='tab:blue')
+    ax1.axhline(y=0, color='gray', linestyle='--', alpha=0.5)  # Add zero line for reference
+    ax1.grid(True, alpha=0.3)  # Add grid for better readability
+    ax1.legend(loc='upper left')
 
+    # Plot Mean Loss on right y-axis
     ax2 = ax1.twinx()
     ax2.set_ylabel('Mean Loss', color='tab:red')
-    ax2.plot(steps, loss_history, color='tab:red')
+    ax2.plot(steps, loss_history, color='tab:red', label='Mean Loss', linewidth=2)
     ax2.tick_params(axis='y', labelcolor='tab:red')
+    ax2.grid(True, alpha=0.3)  # Sync grid with ax1
+    ax2.legend(loc='upper right')
 
+    # Adjust layout and title
     fig.tight_layout()
-    plt.title(f'Training Progress: Reward and Loss (Step {step})')
-    os.makedirs(plot_dir, exist_ok=True)  # Create plots directory if it doesn't exist
-    plt.savefig(os.path.join(plot_dir, f"training_plot_step_{step}.png"))
+    plt.title(f'Training Progress: Reward and Loss (Step {step})', pad=10)
+    
+    # Ensure plot directory exists
+    os.makedirs(plot_dir, exist_ok=True)
+    
+    # Save plot with step-specific filename
+    plot_path = os.path.join(plot_dir, f"training_plot_step_{step}.png")
+    plt.savefig(plot_path, dpi=300, bbox_inches='tight')  # Higher DPI and tight layout
     plt.close()
     
 def find_optimal_cluster_number(X):

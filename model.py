@@ -1,9 +1,12 @@
-import numpy as np
+
 import torch
+import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Categorical
 from gymnasium.spaces.utils import flatdim
+import transformerrr
+
 
 class MultiCategorical:
     def __init__(self, categoricals):
@@ -96,9 +99,8 @@ class MultiAgentFCNetwork(nn.Module):
         return out
 
 
-
 class Policy(nn.Module):
-    def __init__(self, obs_space, action_space, architecture, laac_size, state_size):
+    def __init__(self, obs_space, action_space, architecture, laac_size, state_size,hartpart):
         super(Policy, self).__init__()
 
         self.n_agents = len(obs_space)
@@ -178,7 +180,6 @@ class Policy(nn.Module):
         )
 
 
-# define a simple linear VAE
 class LinearVAE(nn.Module):
     def __init__(self, features, input_size, extra_decoder_input, reconstruct_size):
         super(LinearVAE, self).__init__()
@@ -234,3 +235,4 @@ class LinearVAE(nn.Module):
         # decoding
         reconstruction = self.decoder(dec_input)
         return reconstruction, mu, log_var
+    

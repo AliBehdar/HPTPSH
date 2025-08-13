@@ -1,6 +1,4 @@
-"""
-A collection of environment wrappers for multi-agent environments
-"""
+
 from collections import deque
 from time import perf_counter
 import torch

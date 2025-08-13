@@ -2,7 +2,7 @@
 version_base: 1 
 name : "SePS release"
 seed : 25
-env_name : "rware-tiny-4ag-v2"
+env_name : "rware:rware-tiny-4ag-v2"
 env_args : {}
 time_limit : 500
 dummy_vecenv : True
@@ -22,6 +22,7 @@ network:
   encoder_in : ["agent"]
   decoder_in : ["obs", "act"] # + "z"
   reconstruct : ["next_obs", "rew"]
+  hartpart : False
 
 train:
   lr : 3e-4
