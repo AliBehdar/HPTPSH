@@ -1,7 +1,7 @@
-import time
+
 import torch
 import hydra
-import pickle
+
 
 import logging
 import rware
@@ -58,34 +58,6 @@ def _make_envs(cfg):
     envs = SMACWrapper(envs)
     return envs
 
-def _squash_info(info):
-    info = [i for i in info if i]
-    new_info = {}
-    keys = set([k for i in info for k in i.keys()])
-    keys.discard("TimeLimit.truncated")
-    for key in keys:
-        mean = np.mean([np.array(d[key]).sum() for d in info if key in d])
-        new_info[key] = mean
-    return new_info
-
-def _log_progress(infos, prev_time, step, cfg, log, writer):
-    elapsed = time.time() - prev_time
-    ups = cfg.train.log_interval / elapsed
-    fps = ups * cfg.train.parallel_envs * cfg.train.n_steps
-    mean_reward = np.mean([ep["episode_reward"] for ep in infos])
-    battles_won = 100 * np.mean([ep.get("battle_won", 0) for ep in infos])
-
-    # Text logs go to Hydra’s logger
-    log.info(f"[Step {step:6d}] Timesteps: {cfg.train.parallel_envs * cfg.train.n_steps * step}")
-    log.info(f"UPS: {ups:.1f}, FPS: {fps:.1f}, {100*step/cfg.train.total_steps:.2f}% done")
-    log.info(f"Mean reward: {mean_reward:.3f}, Battles won: {battles_won:.1f}%")
-    log.info("-" * 50)
-
-    # Scalars go to TensorBoard
-    for k, v in _squash_info(infos).items():
-        writer.add_scalar(k, v, step)
-
-
 def _compute_loss(model, storage,cfg):
     with torch.no_grad():
         next_value = model.get_value(storage["state" if cfg.central_v else "obs"][-1])
@@ -132,7 +104,6 @@ def main(cfg: DictConfig):
 
     tb_dir = Path.cwd() / "tensorboard"
     writer = SummaryWriter(log_dir=tb_dir)
-    
 
     envs = _make_envs(cfg)
 
@@ -149,9 +120,7 @@ def main(cfg: DictConfig):
         "agent": {"shape": agent_count, "dtype": np.float32},
     }
     rb = ReplayBuffer(int(agent_count * cfg.train.pretraining_steps * cfg.train.parallel_envs * cfg.train.n_steps), env_dict)
-
-    # before_add = create_before_add_func(env)
-
+    #
     state_size = envs.get_attr("state_size")[0] if cfg.central_v else None
     clusters = None
     if cfg.train.algorithm_mode.startswith("snac"):
@@ -165,7 +134,7 @@ def main(cfg: DictConfig):
             model_count = min(10, len(envs.observation_space))
 
     # make actor-critic model
-    model = Policy(envs.observation_space, envs.action_space, cfg.network.architecture, model_count, state_size)
+    model = Policy(envs.observation_space, envs.action_space, cfg.network.architecture, model_count, state_size,cfg)
     model.to(cfg.train.device)
     optimizer = torch.optim.Adam(model.parameters(), cfg.train.lr, eps=cfg.train.optim_eps)
 
@@ -197,12 +166,9 @@ def main(cfg: DictConfig):
         model.laac_sample = torch.zeros(cfg.train.parallel_envs, agent_count).long()
         # print(model.laac_sample)
 
-    start_time = time.time()
     reward_history = []
     loss_history = []
-    interval_losses = []
-    best_mean_reward = float('-inf')
-    patience = 10
+
     plot_dir = Path.cwd() / "plots" 
     for step in range(cfg.train.total_steps):
         
@@ -210,23 +176,10 @@ def main(cfg: DictConfig):
             #print(f"Pretraining at step: {step}")
             cluster_idx = compute_clusters(rb.get_all_transitions(), agent_count,cfg)
             model.laac_sample = cluster_idx.repeat(cfg.train.parallel_envs, 1)
-            outdir = Path.cwd()
-            with open(Path(outdir) / f"{cfg.env_name}.p", "wb") as f:
-                pickle.dump(rb.get_all_transitions(), f)
-            
-
-
-        if step % cfg.train.log_interval == 0 and storage["info"]:
-            mean_reward=_log_progress(storage["info"], start_time, step, cfg, log, writer)
-            if interval_losses :
-                mean_loss= np.mean(interval_losses)
-                writer.add_scalar("train/loss",mean_loss,step)
-                loss_history.append(mean_loss)
-            reward_history.append(mean_reward)
-            interval_losses=[]
-
-
-
+            #outdir = Path.cwd()
+            #with open(Path(outdir) / f"{cfg.env_name}.p", "wb") as f:
+            #    pickle.dump(rb.get_all_transitions(), f)
+  
         for n_step in range(cfg.train.n_steps):
             with torch.no_grad():
                 actions = model.act(storage["obs"][-1], storage["action_mask"][-1])
@@ -270,7 +223,6 @@ def main(cfg: DictConfig):
                     }
                     rb.add(**data)
 
-            # for smac:
             if cfg.central_v:
                 storage["state"].append(state)
 
@@ -281,25 +233,19 @@ def main(cfg: DictConfig):
             continue
 
         loss = _compute_loss(model, storage,cfg)
+        if reward.sum().item()>0:
+            print(f"Step {step}, Reward: {reward}")
+        rollout_rewards = torch.stack(list(storage["rewards"]))
+        mean_reward = torch.mean(rollout_rewards).item()
+        reward_history.append(mean_reward)
+        loss_history.append(loss.item())
 
-        # if laac_mode=="laac" and step and step % laac_timestep == 0:
-        #     loss += _compute_laac_loss(model, storage)
-        if step %1000==0:  
+        if step % 1000 == 0 :  
             scalar_loss = loss.item() 
             print("Step:",step," Total steps ",cfg.train.total_steps,"And loss",scalar_loss)
             #if reward_history and loss_history and step % 1000 == 0:
             plot_training(cfg,reward_history, loss_history, step, plot_dir)
-                    # Early stopping check
-        if mean_reward > best_mean_reward:
-            best_mean_reward=mean_reward
-            current_patience = patience
-        else:
-            current_patience -=1
-            if current_patience <=0:
-                log.info("Early stopping triggered")
-                break
-
-        start_time = time.time()
+ 
         storage["info"].clear()
         optimizer.zero_grad()
         loss.backward()
