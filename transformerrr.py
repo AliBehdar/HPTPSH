@@ -108,6 +108,7 @@ class EncoderLayer(nn.Module):
         ff_output = self.feed_forward(x)
         x = self.norm2(x + self.dropout(ff_output))
         return x
+    
 class DecoderLayer(nn.Module):
     def __init__(self,cfg):
         super(DecoderLayer, self).__init__()
@@ -134,4 +135,19 @@ class DecoderLayer(nn.Module):
         ff_output = self.feed_forward(x)
         x = self.norm3(x + self.dropout(ff_output))
         return x
-    
+
+class Transformer(nn.Module):
+    def __init__(self,cfg):
+        super(Transformer, self).__init__()
+        self.encoder_layers = nn.ModuleList([EncoderLayer(cfg) for _ in range(cfg.network.num_layers)])
+        self.decoder_layers = nn.ModuleList([DecoderLayer(cfg) for _ in range(cfg.network.num_layers)])
+        
+    def forward(self, out):
+
+        for enc_layer in self.encoder_layers:
+            enc_output = enc_layer(out, src_mask=None)
+        
+        for dec_layer in self.decoder_layers:
+            dec_output = dec_layer(out, enc_output, src_mask=None, tgt_mask=None)
+
+        return dec_output 

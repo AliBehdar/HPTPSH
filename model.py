@@ -67,18 +67,19 @@ class MultiAgentNetwork(nn.Module):
         
         self.hartpart=cfg.network.hartpart
 
-        self.encoder_layers = nn.ModuleList([transformerrr.EncoderLayer(self.cfg) for _ in range(self.cfg.network.num_layers)])
-        self.decoder_layers = nn.ModuleList([transformerrr.DecoderLayer(self.cfg) for _ in range(self.cfg.network.num_layers)])
+
+        self.transformer=transformerrr.Transformer(cfg)
+
     def forward(self, inputs, laac_indices):
         # print(inputs[0].shape)
         # assert inputs[0].dim() == 2
         # out2 = self.forward2(inputs, laac_indices)
+        inputs = torch.stack(inputs)
+        out = torch.stack([net(inputs) for net in self.independent])
         if self.cfg.network.hartpart:
-            inputs = torch.stack(inputs)
-            out = torch.stack([net(inputs) for net in self.independent])
+
+            out=self.transformer(out)
             
-            outEn=self.encoder_layers(out,)
-            out=self.decoder_layers(out,outEn,)
             if inputs[0].dim() == 3:
                 laac_indices = laac_indices.T.unsqueeze(0).unsqueeze(-1).unsqueeze(2)
                 laac_indices = laac_indices.expand(1, *out.shape[1:])
@@ -89,8 +90,6 @@ class MultiAgentNetwork(nn.Module):
 
             out = [x.squeeze(0).squeeze(0) for x in out]
         else:
-            inputs = torch.stack(inputs)
-            out = torch.stack([net(inputs) for net in self.independent])
             if inputs[0].dim() == 3:
                 laac_indices = laac_indices.T.unsqueeze(0).unsqueeze(-1).unsqueeze(2)
                 laac_indices = laac_indices.expand(1, *out.shape[1:])
