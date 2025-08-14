@@ -3,6 +3,9 @@ version_base: 1
 name : "SePS release"
 seed : 25
 env_name : "rware:rware-tiny-4ag-v2"
+env2 : "rware-small-4ag-v2"
+env3 : "rware-medium-6ag-hard-v2"
+env4 : "rware-tiny-2ag-v2"
 env_args : {}
 time_limit : 500
 dummy_vecenv : True
@@ -23,6 +26,15 @@ network:
   decoder_in : ["obs", "act"] # + "z"
   reconstruct : ["next_obs", "rew"]
   hartpart : False
+  src_vocab_size : 5000
+  tgt_vocab_size : 5000
+  d_model : 512
+  num_heads : 8
+  num_layers : 6
+  d_ff : 2048
+  max_seq_length : 100
+  dropout : 0.1
+
 
 train:
   lr : 3e-4

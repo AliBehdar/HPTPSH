@@ -120,7 +120,7 @@ def main(cfg: DictConfig):
         "agent": {"shape": agent_count, "dtype": np.float32},
     }
     rb = ReplayBuffer(int(agent_count * cfg.train.pretraining_steps * cfg.train.parallel_envs * cfg.train.n_steps), env_dict)
-
+    #
     state_size = envs.get_attr("state_size")[0] if cfg.central_v else None
     clusters = None
     if cfg.train.algorithm_mode.startswith("snac"):
@@ -134,7 +134,7 @@ def main(cfg: DictConfig):
             model_count = min(10, len(envs.observation_space))
 
     # make actor-critic model
-    model = Policy(envs.observation_space, envs.action_space, cfg.network.architecture, model_count, state_size,cfg.network.hartpart)
+    model = Policy(envs.observation_space, envs.action_space, cfg.network.architecture, model_count, state_size,cfg)
     model.to(cfg.train.device)
     optimizer = torch.optim.Adam(model.parameters(), cfg.train.lr, eps=cfg.train.optim_eps)
 

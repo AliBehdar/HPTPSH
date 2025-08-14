@@ -32,7 +32,7 @@ class MultiCategorical:
         return [c.entropy() for c in self.categoricals]
 
 
-class MultiAgentFCNetwork(nn.Module):
+class MultiAgentNetwork(nn.Module):
     def _init_layer(self, m):
         nn.init.orthogonal_(m.weight.data, gain=np.sqrt(2))
         nn.init.constant_(m.bias.data, 0)
@@ -54,53 +54,70 @@ class MultiAgentFCNetwork(nn.Module):
 
         return nn.Sequential(*mods)
 
-    def __init__(self, input_sizes, idims):
+    def __init__(self, input_sizes, idims,cfg):
         super().__init__()
 
+        self.cfg=cfg
         self.laac_size = len(input_sizes)
         self.independent = nn.ModuleList()
 
         for size in input_sizes:
             dims = [size] + idims
             self.independent.append(self._make_fc(dims))
+        
+        self.hartpart=cfg.network.hartpart
 
+        self.encoder_layers = nn.ModuleList([transformerrr.EncoderLayer(self.cfg) for _ in range(self.cfg.network.num_layers)])
+        self.decoder_layers = nn.ModuleList([transformerrr.DecoderLayer(self.cfg) for _ in range(self.cfg.network.num_layers)])
     def forward(self, inputs, laac_indices):
         # print(inputs[0].shape)
         # assert inputs[0].dim() == 2
         # out2 = self.forward2(inputs, laac_indices)
-        inputs = torch.stack(inputs)
-        out = torch.stack([net(inputs) for net in self.independent])
-        if inputs[0].dim() == 3:
-            laac_indices = laac_indices.T.unsqueeze(0).unsqueeze(-1).unsqueeze(2)
-            laac_indices = laac_indices.expand(1, *out.shape[1:])
+        if self.cfg.network.hartpart:
+            inputs = torch.stack(inputs)
+            out = torch.stack([net(inputs) for net in self.independent])
+            
+            outEn=self.encoder_layers(out,)
+            out=self.decoder_layers(out,outEn,)
+            if inputs[0].dim() == 3:
+                laac_indices = laac_indices.T.unsqueeze(0).unsqueeze(-1).unsqueeze(2)
+                laac_indices = laac_indices.expand(1, *out.shape[1:])
+            else:
+                laac_indices = laac_indices.T.unsqueeze(0).unsqueeze(-1).expand(1, *out.shape[1:])
+
+            out = out.gather(0, laac_indices).split(1, dim=1)
+
+            out = [x.squeeze(0).squeeze(0) for x in out]
         else:
-            laac_indices = laac_indices.T.unsqueeze(0).unsqueeze(-1).expand(1, *out.shape[1:])
+            inputs = torch.stack(inputs)
+            out = torch.stack([net(inputs) for net in self.independent])
+            if inputs[0].dim() == 3:
+                laac_indices = laac_indices.T.unsqueeze(0).unsqueeze(-1).unsqueeze(2)
+                laac_indices = laac_indices.expand(1, *out.shape[1:])
+            else:
+                laac_indices = laac_indices.T.unsqueeze(0).unsqueeze(-1).expand(1, *out.shape[1:])
 
-        out = out.gather(0, laac_indices).split(1, dim=1)
+            out = out.gather(0, laac_indices).split(1, dim=1)
 
-        out = [x.squeeze(0).squeeze(0) for x in out]
-        # print(out[0].shape)
+            out = [x.squeeze(0).squeeze(0) for x in out]
 
-        # out_test = [self.independent[0](x) for x in inputs]
-
-        # inputs = torch.stack(inputs)
-        # shape = inputs.shape
-        # inputs = inputs.reshape(-1, shape[-1])
-        # out = torch.stack([net(inputs) for net in self.independent])
-        # laac_indices = laac_indices.T.reshape(-1, 1).expand_as(out[0]).unsqueeze(0)
-        # out = out.gather(0, laac_indices)
-        # out_shape = *shape[:-1], out.shape[-1]
-        # out = out.reshape(out_shape)
-
-        # print(out.shape)
-        # out = out.split(1, dim=0)
-        # out = [x.squeeze(0) for x in out]
-        # print(out[0].shape)
         return out
+    def save_transformer(self, path='transformer.pth'):
+        torch.save(self.transformer.state_dict(), path)
+        print(f"Transformer saved to {path}")
+
+    # Optional: Static method to load a standalone transformer (recreates it)
+    @staticmethod
+    def load_transformer(cfg, path='transformer.pth'):
+        transformer = transformerrr.Transformer(cfg)
+        transformer.load_state_dict(torch.load(path))
+        transformer.eval()  # Set to eval mode by default; change if needed
+        print(f"Transformer loaded from {path}")
+        return transformer
 
 
 class Policy(nn.Module):
-    def __init__(self, obs_space, action_space, architecture, laac_size, state_size,hartpart):
+    def __init__(self, obs_space, action_space, architecture, laac_size, state_size,cfg):
         super(Policy, self).__init__()
 
         self.n_agents = len(obs_space)
@@ -112,9 +129,7 @@ class Policy(nn.Module):
         obs_shape = [flatdim(o) for o in obs_space]
         action_shape = [flatdim(a) for a in action_space]
 
-        self.actor = MultiAgentFCNetwork(
-            obs_shape, architecture["actor"] + [action_shape[0]]
-        )
+        self.actor = MultiAgentNetwork(obs_shape, architecture["actor"] + [action_shape[0]],cfg)
         for layers in self.actor.independent:
             nn.init.orthogonal_(layers[-1].weight.data, gain=0.01)
 
@@ -123,10 +138,7 @@ class Policy(nn.Module):
         else:
             state_size = obs_shape
 
-        self.critic = MultiAgentFCNetwork(
-            state_size,
-            architecture["critic"] + [1],
-        )
+        self.critic = MultiAgentNetwork(state_size,architecture["critic"] + [1],cfg)
 
         num_outputs = [asp.n for asp in action_space]
 

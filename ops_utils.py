@@ -179,6 +179,7 @@ def find_optimal_cluster_number(X):
 
     max_key = min(scores, key=lambda k: scores[k])
     return max_key
+
 class Torcherize(VecEnvWrapper):
     
     def __init__(self,venv, cfg):
@@ -216,4 +217,3 @@ class Torcherize(VecEnvWrapper):
             torch.from_numpy(done).float().to(self.cfg.train.device),
             info,
         )
-
