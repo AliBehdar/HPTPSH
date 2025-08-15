@@ -60,25 +60,37 @@ class MultiAgentNetwork(nn.Module):
         self.cfg=cfg
         self.laac_size = len(input_sizes)
         self.independent = nn.ModuleList()
-
         for size in input_sizes:
             dims = [size] + idims
             self.independent.append(self._make_fc(dims))
         
         self.hartpart=cfg.network.hartpart
+        self.embed = nn.Linear(input_sizes[0], cfg.network.d_model)  # Assumes uniform input_sizes
 
-        self.encoder_layers = nn.ModuleList([transformerrr.EncoderLayer(self.cfg) for _ in range(self.cfg.network.num_layers)])
-        self.decoder_layers = nn.ModuleList([transformerrr.DecoderLayer(self.cfg) for _ in range(self.cfg.network.num_layers)])
+        # Add positional encoding
+        #self.pos_enc = transformerrr.PositionalEncoding(cfg.network.d_model, self.laac_size)
+        self.transformer=transformerrr.Transformer(cfg)
+
     def forward(self, inputs, laac_indices):
-        # print(inputs[0].shape)
+
         # assert inputs[0].dim() == 2
-        # out2 = self.forward2(inputs, laac_indices)
+
+        inputs = torch.stack(inputs)
+
         if self.cfg.network.hartpart:
-            inputs = torch.stack(inputs)
-            out = torch.stack([net(inputs) for net in self.independent])
+
+            #x = inputs.permute(1, 0, 2)
+
+            # Embed to d_model
+            x = self.embed(inputs)
+
+            # Add positional encoding
+            #x = self.pos_enc(x)
             
-            outEn=self.encoder_layers(out,)
-            out=self.decoder_layers(out,outEn,)
+            out=self.transformer(x)
+
+            out = torch.stack([net(inputs) for net in self.independent])
+
             if inputs[0].dim() == 3:
                 laac_indices = laac_indices.T.unsqueeze(0).unsqueeze(-1).unsqueeze(2)
                 laac_indices = laac_indices.expand(1, *out.shape[1:])
@@ -89,7 +101,7 @@ class MultiAgentNetwork(nn.Module):
 
             out = [x.squeeze(0).squeeze(0) for x in out]
         else:
-            inputs = torch.stack(inputs)
+
             out = torch.stack([net(inputs) for net in self.independent])
             if inputs[0].dim() == 3:
                 laac_indices = laac_indices.T.unsqueeze(0).unsqueeze(-1).unsqueeze(2)

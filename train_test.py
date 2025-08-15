@@ -109,8 +109,8 @@ def main(cfg: DictConfig):
 
     agent_count = len(envs.observation_space)
     obs_size = envs.observation_space[0].shape
-    act_size = envs.action_space[0].n
-
+    act_size = envs.action_space[0].n+1
+    print('envs.action_space[0].n',envs.action_space[0].n+1)
     env_dict = {
         "obs": {"shape": obs_size, "dtype": np.float32},
         "rew": {"shape": 1, "dtype": np.float32},
@@ -183,6 +183,7 @@ def main(cfg: DictConfig):
         for n_step in range(cfg.train.n_steps):
             with torch.no_grad():
                 actions = model.act(storage["obs"][-1], storage["action_mask"][-1])
+                
             (obs, state, action_mask), reward, done, info = envs.step(actions)
 
             if cfg.train.use_proper_termination:
