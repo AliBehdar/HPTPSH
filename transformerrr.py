@@ -39,6 +39,7 @@ class MultiHeadAttention(nn.Module):
         
     def split_heads(self, x):
         # Reshape the input to have num_heads for multi-head attention
+        #print(x.size())
         batch_size, seq_length, d_model = x.size()
         return x.view(batch_size, seq_length, self.num_heads, self.d_k).transpose(1, 2)
         
@@ -48,6 +49,16 @@ class MultiHeadAttention(nn.Module):
         return x.transpose(1, 2).contiguous().view(batch_size, seq_length, self.d_model)
         
     def forward(self, Q, K, V, mask=None):
+        reshape_back = False
+        if Q.dim() == 4:
+            reshape_back = True
+            orig_shape = Q.shape
+            seq, time, bat, d = orig_shape
+            eff_b = time * bat
+            Q = Q.permute(1, 2, 0, 3).contiguous().view(eff_b, seq, d)
+            K = K.permute(1, 2, 0, 3).contiguous().view(eff_b, seq, d)
+            V = V.permute(1, 2, 0, 3).contiguous().view(eff_b, seq, d)
+
         # Apply linear transformations and split heads
         Q = self.split_heads(self.W_q(Q))
         K = self.split_heads(self.W_k(K))
@@ -58,6 +69,9 @@ class MultiHeadAttention(nn.Module):
         
         # Combine heads and apply output transformation
         output = self.W_o(self.combine_heads(attn_output))
+        if reshape_back:
+            output = output.view(time, bat, seq, d).permute(2, 0, 1, 3).contiguous()
+
         return output
 
 class PositionWiseFeedForward(nn.Module):
@@ -140,14 +154,12 @@ class Transformer(nn.Module):
     def __init__(self,cfg):
         super(Transformer, self).__init__()
         self.encoder_layers = nn.ModuleList([EncoderLayer(cfg) for _ in range(cfg.network.num_layers)])
-        self.decoder_layers = nn.ModuleList([DecoderLayer(cfg) for _ in range(cfg.network.num_layers)])
+        #self.decoder_layers = nn.ModuleList([DecoderLayer(cfg) for _ in range(cfg.network.num_layers)])
         
     def forward(self, out):
 
         for enc_layer in self.encoder_layers:
-            enc_output = enc_layer(out, src_mask=None)
+            enc_output = enc_layer(out, mask=None)
         
-        for dec_layer in self.decoder_layers:
-            dec_output = dec_layer(out, enc_output, src_mask=None, tgt_mask=None)
 
-        return dec_output 
+        return enc_output 
