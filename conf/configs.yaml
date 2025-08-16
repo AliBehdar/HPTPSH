@@ -2,19 +2,21 @@
 version_base: 1 
 name : "SePS release"
 seed : 25
-env_name : "rware:rware-tiny-4ag-v2"
-env2 : "rware-small-4ag-v2"
-env3 : "rware-medium-6ag-hard-v2"
-env4 : "rware-tiny-2ag-v2"
 env_args : {}
 time_limit : 500
 dummy_vecenv : True
 central_v : False
 clusters : None
 
+env:
+  - env1_name  : "rware:rware-tiny-4ag-v2"
+  - env2_name  : "rware:rware-small-4ag-v2"
+  - env3_name  : "rware:rware-medium-6ag-hard-v2"
+  - env4_name  : "rware:rware-tiny-2ag-v2"
+
 hydra:
   run:
-    dir: ./outputs/${now:%Y-%m-%d}
+    dir: ./outputs/${now:%Y-%m-%d-%H-%M-%S}
   output_subdir: tensorboard
   job:
     chdir: true
@@ -25,7 +27,7 @@ network:
   encoder_in : ["agent"]
   decoder_in : ["obs", "act"] # + "z"
   reconstruct : ["next_obs", "rew"]
-  hartpart : True
+  hartpart : False
   d_model : 5
   num_heads : 5
   num_layers : 6
@@ -36,10 +38,10 @@ network:
 train:
   lr : 3e-4
   optim_eps : 0.00001
-  parallel_envs : 8
+  parallel_envs : 4
   n_steps : 5
-  gamma : 0.99
-  kl_weight : 0.0001
+  gamma : 0.999
+  kl_weight : 0.001
   epochs : 10
   z_features : 10
   algorithm_mode : "ops" # "ops", "iac", "snac", or "snac-a"
@@ -47,9 +49,13 @@ train:
   ops_timestep : 100
   delay : 0
   pretraining_steps : 5000
+  update_every_episodes : 5
+  total_episodes : 200
+  pretraining_episodes : 50
+  average_episode_length : 500
   pretraining_times : 1
   batch_size : 128
-  total_steps : 10000000
+  total_steps : 100000
   log_interval : 20000
   save_interval : 1000000
   eval_interval : 10000

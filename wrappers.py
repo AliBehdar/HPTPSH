@@ -76,19 +76,6 @@ class RecordEpisodeStatistics(gym.Wrapper):
         rew_array = np.array(rew_list, dtype=np.float64)
         return obs, rew_array, terminated, truncated, info
 
-    #def step(self, action):
-     #   observation, reward, done, info = super().step(action)
-      #  self.episode_reward += np.array(reward, dtype=np.float64)
-       # self.episode_length += 1
-        #ifl all(done):
-         #   info["episode_reward"] = self.episode_reward
-          #  for i, agent_reward in enumerate(self.episode_reward):
-           #     info[f"agent{i}/episode_reward"] = agent_reward
-            #info["episode_length"] = self.episode_length
-            #info["episode_time"] = perf_counter() - self.t0
-
-
-
 class FlattenObservation(ObservationWrapper):
     r"""Observation wrapper that flattens the observation of individual agents."""
 
@@ -202,6 +189,26 @@ class TimeLimit(gym.wrappers.TimeLimit):
             done = len(observation) * [True]
         return observation, reward, done, info
 
+class PickupRewardWrapper(gym.Wrapper):
+    def __init__(self, env):
+        super().__init__(env)
+        self.pickup_reward = 0.5
+        self.prev_carrying = None
+
+    def reset(self, seed=None, options=None):
+        obs, info = self.env.reset(seed=seed, options=options)
+        self.prev_carrying = [o[2] for o in obs]  # carrying flag is at index 2 in each agent's observation
+        return obs, info
+
+    def step(self, action):
+ 
+        obs, rewards, done, info = self.env.step(action)
+        new_carrying = [o[2] for o in obs]  # carrying flag is at index 2
+        for i in range(len(new_carrying)):
+            if new_carrying[i] == 1 and self.prev_carrying[i] == 0:
+                rewards[i] += self.pickup_reward
+        self.prev_carrying = new_carrying
+        return obs, rewards, done, info
 
 class ClearInfo(gym.Wrapper):
     def step(self, action):
@@ -242,29 +249,3 @@ class SMACWrapper(VecEnvWrapper):
         state = self._make_state(len(obs))
         action_mask = self._make_action_mask(len(obs))
         return ((obs, state, action_mask),rew,done,info,)
-
-def Monitor(env, video_folder=None, episode_trigger=None, step_trigger=None,
-            reset_keywords=(), info_keywords=(), override_existing=True):
-    """
-    Drop-in replacement for gym.wrappers.Monitor using Gymnasium’s new wrappers:
-      1) Record episode stats (reward/length)
-      2) Optionally record video
-
-    Args:
-      env:          the base environment
-      video_folder: if not None, path to save .mp4 files
-      episode_trigger, step_trigger: passed to RecordVideo
-      reset_keywords, info_keywords, override_existing: ignored (legacy)
-    """
-    # 1) always track episode statistics
-    env = RecordEpisodeStatistics(env)
-
-    # 2) if video_folder is set, wrap with RecordVideo
-    if video_folder is not None:
-        env = RecordVideo(
-            env,
-            video_folder=video_folder,
-            episode_trigger=episode_trigger,
-            step_trigger=step_trigger
-        )
-    return env

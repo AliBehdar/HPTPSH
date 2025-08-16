@@ -65,30 +65,17 @@ class MultiAgentNetwork(nn.Module):
             self.independent.append(self._make_fc(dims))
         
         self.hartpart=cfg.network.hartpart
-        self.embed = nn.Linear(input_sizes[0], cfg.network.d_model)  # Assumes uniform input_sizes
-
-        # Add positional encoding
-        #self.pos_enc = transformerrr.PositionalEncoding(cfg.network.d_model, self.laac_size)
+        self.embed = nn.Linear(input_sizes[0], cfg.network.d_model)
         self.transformer=transformerrr.Transformer(cfg)
 
     def forward(self, inputs, laac_indices):
 
-        # assert inputs[0].dim() == 2
 
         inputs = torch.stack(inputs)
 
         if self.cfg.network.hartpart:
-
-            #x = inputs.permute(1, 0, 2)
-
-            # Embed to d_model
             x = self.embed(inputs)
-
-            # Add positional encoding
-            #x = self.pos_enc(x)
-            
             out=self.transformer(x)
-
             out = torch.stack([net(inputs) for net in self.independent])
 
             if inputs[0].dim() == 3:
@@ -155,7 +142,7 @@ class Policy(nn.Module):
         num_outputs = [asp.n for asp in action_space]
 
         self.laac_params = nn.Parameter(torch.ones(self.n_agents-1, laac_size))
-        print(self)
+        #print(self)
 
     def sample_laac(self, batch_size):
         sample = Categorical(logits=self.laac_params).sample([batch_size])
