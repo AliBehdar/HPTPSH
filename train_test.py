@@ -1,9 +1,4 @@
-
-import torch
-import hydra
-
-
-import logging
+import logging,hydra
 import rware
 import numpy as np
 import gymnasium as gym
@@ -106,153 +101,165 @@ def main(cfg: DictConfig):
     tb_dir = Path.cwd() / "tensorboard"
     writer = SummaryWriter(log_dir=tb_dir)
     env_list = [list(item.values())[0] for item in cfg.env]
-    envs = _make_envs(cfg)
+    print(env_list[0])
+    for env in env_list:
+        envs = _make_envs(cfg)
 
 
-    agent_count = len(envs.observation_space)
-    obs_size = envs.observation_space[0].shape
-    act_size = envs.action_space[0].n
-    env_dict = {
-        "obs": {"shape": obs_size, "dtype": np.float32},
-        "rew": {"shape": 1, "dtype": np.float32},
-        "next_obs": {"shape": obs_size, "dtype": np.float32},
-        "done": {"shape": 1, "dtype": np.float32},
-        "act": {"shape": act_size, "dtype": np.float32},
-        "agent": {"shape": agent_count, "dtype": np.float32},
-    }
-    rb = ReplayBuffer(int(agent_count * cfg.train.pretraining_episodes* cfg.train.parallel_envs * cfg.train.average_episode_length), env_dict)
-    #
-    state_size = envs.get_attr("state_size")[0] if cfg.central_v else None
-    clusters = 3
-    if cfg.train.algorithm_mode.startswith("snac"):
-        model_count = 1
-    elif cfg.train.algorithm_mode == "iac":
-        model_count = len(envs.observation_space)
-    elif cfg.train.algorithm_mode == "ops":
-        if clusters:
-            model_count = clusters
-        else:
-            model_count = min(10, len(envs.observation_space))
+        agent_count = len(envs.observation_space)
+        obs_size = envs.observation_space[0].shape
+        act_size = envs.action_space[0].n+1
+        print('envs.action_space[0].n',envs.action_space[0].n+1)
+        env_dict = {
+            "obs": {"shape": obs_size, "dtype": np.float32},
+            "rew": {"shape": 1, "dtype": np.float32},
+            "next_obs": {"shape": obs_size, "dtype": np.float32},
+            "done": {"shape": 1, "dtype": np.float32},
+            "act": {"shape": act_size, "dtype": np.float32},
+            "agent": {"shape": agent_count, "dtype": np.float32},
+        }
+        # Adjusted buffer size for episode-based; assumes cfg.train.average_episode_length is set in config
+        rb = ReplayBuffer(int(agent_count * cfg.train.pretraining_episodes * cfg.train.parallel_envs * cfg.train.average_episode_length), env_dict)
+        #
+        state_size = envs.get_attr("state_size")[0] if cfg.central_v else None
+        clusters = None
+        if cfg.train.algorithm_mode.startswith("snac"):
+            model_count = 1
+        elif cfg.train.algorithm_mode == "iac":
+            model_count = len(envs.observation_space)
+        elif cfg.train.algorithm_mode == "ops":
+            if clusters:
+                model_count = clusters
+            else:
+                model_count = min(10, len(envs.observation_space))
 
-    # make actor-critic model
-    model = Policy(envs.observation_space, envs.action_space, cfg.network.architecture, model_count, state_size,cfg)
-    model.to(cfg.train.device)
+        # make actor-critic model
+        model = Policy(envs.observation_space, envs.action_space, cfg.network.architecture, model_count, state_size,cfg)
+        model.to(cfg.train.device)
+        optimizer = torch.optim.Adam(model.parameters(), cfg.train.lr, eps=cfg.train.optim_eps)
 
-    obs, state, action_mask = envs.reset()
+        # creates and initialises storage
+        obs, state, action_mask = envs.reset()
 
-    if cfg.central_v:
-        pass
+        # for smac:
+        if cfg.central_v:
+            pass  # state is used
+        # ---------
+        model.sample_laac(cfg.train.parallel_envs)
+        if cfg.train.algorithm_mode == "iac":
+            model.laac_sample = torch.arange(len(envs.observation_space)).repeat(cfg.train.parallel_envs, 1)
+            # print(model.laac_sample)
+        if cfg.train.algorithm_mode == "ops":
+            model.laac_sample = torch.zeros(cfg.train.parallel_envs, agent_count).long()
+            # print(model.laac_sample)
 
-    model.sample_laac(cfg.train.parallel_envs)
-    if cfg.train.algorithm_mode == "iac":
-        model.laac_sample = torch.arange(len(envs.observation_space)).repeat(cfg.parallel_envs, 1)
-        # print(model.laac_sample)
-    if cfg.train.algorithm_mode == "ops":
-        model.laac_sample = torch.zeros(cfg.train.parallel_envs, agent_count).long()
-        # print(model.laac_sample)
+        reward_history = []
+        loss_history = []
 
-    reward_history = []
-    loss_history = []
+        plot_dir = Path.cwd() / "plots" 
+        total_episodes_completed = 0
+        update_step = 0
 
-    plot_dir = Path.cwd() / "plots" 
-    total_episodes_completed = 0
-    update_step = 0
+        laac_rewards = torch.zeros(cfg.train.parallel_envs, agent_count).to(cfg.train.device)  # assuming device
 
-    laac_rewards = torch.zeros(cfg.train.parallel_envs, agent_count).to(cfg.train.device)  # assuming device
-    while total_episodes_completed < cfg.train.total_episodes:
-
-        pretrain_points = [cfg.train.delay + cfg.train.pretraining_episodes*(i+1) for i in range(cfg.train.pretraining_times)]
-        if cfg.train.algorithm_mode == "ops" and total_episodes_completed in pretrain_points:
-
-            cluster_idx = compute_clusters(rb.get_all_transitions(), agent_count,cfg)
-            model.laac_sample = cluster_idx.repeat(cfg.train.parallel_envs, 1)
-
-        storage = defaultdict(list)
-        storage["obs"].append(obs)
-        storage["done"].append(torch.zeros(cfg.train.parallel_envs))
-        storage["info"] = []  # list instead of deque
-        storage["state"].append(state) if cfg.central_v else None
-        storage["action_mask"].append(action_mask)
-        storage["actions"] = []
-        storage["rewards"] = []
-
-        episodes_this_batch = 0
-
-        while episodes_this_batch < cfg.train.update_every_episodes and total_episodes_completed < cfg.train.total_episodes:
-            with torch.no_grad():
-                actions = model.act(storage["obs"][-1], storage["action_mask"][-1])
-                
-            (obs, state, action_mask), reward, done, info = envs.step(actions)
-
-            if cfg.train.use_proper_termination:
-                bad_done = torch.FloatTensor(
-                    [1.0 if i.get("TimeLimit.truncated", False) else 0.0 for i in info]
-                ).to(cfg.train.device)
-                done = done - bad_done
-
-            storage["actions"].append(actions)
-            storage["rewards"].append(reward)
-            storage["done"].append(done)
+        while total_episodes_completed < cfg.train.total_episodes:
+            
+            pretrain_points = [cfg.train.delay + cfg.train.pretraining_episodes*(i+1) for i in range(cfg.train.pretraining_times)]
+            if cfg.train.algorithm_mode == "ops" and total_episodes_completed in pretrain_points:
+                #print(f"Pretraining at episodes: {total_episodes_completed}")
+                cluster_idx = compute_clusters(rb.get_all_transitions(), agent_count,cfg)
+                model.laac_sample = cluster_idx.repeat(cfg.train.parallel_envs, 1)
+                #outdir = Path.cwd()
+                #with open(Path(outdir) / f"{cfg.env_name}.p", "wb") as f:
+                #    pickle.dump(rb.get_all_transitions(), f)
+    
+            # Reset storage for this batch as lists
+            storage = defaultdict(list)
             storage["obs"].append(obs)
-            if cfg.central_v:
-                storage["state"].append(state)
+            storage["done"].append(torch.zeros(cfg.train.parallel_envs))
+            storage["info"] = []  # list instead of deque
+            storage["state"].append(state) if cfg.central_v else None
             storage["action_mask"].append(action_mask)
+            storage["actions"] = []
+            storage["rewards"] = []
 
-            new_episodes = sum(1 for i in info if "episode_reward" in i)
-            episodes_this_batch += new_episodes
-            total_episodes_completed += new_episodes
-            storage["info"].extend([i for i in info if "episode_reward" in i])
+            episodes_this_batch = 0
 
-            laac_rewards += reward
+            while episodes_this_batch < cfg.train.update_every_episodes and total_episodes_completed < cfg.train.total_episodes:
+                with torch.no_grad():
+                    actions = model.act(storage["obs"][-1], storage["action_mask"][-1])
+                    
+                (obs, state, action_mask), reward, done, info = envs.step(actions)
 
-            if cfg.train.algorithm_mode == "ops" and total_episodes_completed < cfg.train.delay + cfg.train.pretraining_times * cfg.train.pretraining_episodes:
-                for agent in range(agent_count):
-                    one_hot_action = torch.nn.functional.one_hot(actions[agent], act_size).numpy()
-                    one_hot_agent = torch.nn.functional.one_hot(torch.tensor(agent), agent_count).repeat(cfg.train.parallel_envs, 1).numpy()
+                if cfg.train.use_proper_termination:
+                    bad_done = torch.FloatTensor(
+                        [1.0 if i.get("TimeLimit.truncated", False) else 0.0 for i in info]
+                    ).to(cfg.train.device)
+                    done = done - bad_done
 
-                    next_obs = obs[agent].numpy()
-                    for env_idx in range(cfg.train.parallel_envs):
-                        if bad_done[env_idx]:
-                            term_obs = info[env_idx]["terminal_observation"]
-                            next_obs[env_idx] = np.array(term_obs[agent])
+                storage["actions"].append(actions)
+                storage["rewards"].append(reward)
+                storage["done"].append(done)
+                storage["obs"].append(obs)
+                if cfg.central_v:
+                    storage["state"].append(state)
+                storage["action_mask"].append(action_mask)
 
-                    data = {
-                        "obs": storage["obs"][-2][agent].numpy(),
-                        "act": one_hot_action,
-                        "next_obs": next_obs,
-                        "rew": reward[:, agent].unsqueeze(-1).numpy(),
-                        "done": done.unsqueeze(-1).numpy(),
-                        "agent": one_hot_agent,
-                    }
-                    rb.add(**data)
+                new_episodes = sum(1 for i in info if "episode_reward" in i)
+                episodes_this_batch += new_episodes
+                total_episodes_completed += new_episodes
+                storage["info"].extend([i for i in info if "episode_reward" in i])
 
-        if cfg.train.algorithm_mode == "ops" and total_episodes_completed < cfg.train.pretraining_episodes and cfg.train.delay_training:
+                laac_rewards += reward
+
+                if cfg.train.algorithm_mode == "ops" and total_episodes_completed < cfg.train.delay + cfg.train.pretraining_times * cfg.train.pretraining_episodes:
+                    for agent in range(agent_count):
+                        one_hot_action = torch.nn.functional.one_hot(actions[agent], act_size).numpy()
+                        one_hot_agent = torch.nn.functional.one_hot(torch.tensor(agent), agent_count).repeat(cfg.train.parallel_envs, 1).numpy()
+
+                        next_obs = obs[agent].numpy()
+                        for env_idx in range(cfg.train.parallel_envs):
+                            if bad_done[env_idx]:
+                                term_obs = info[env_idx]["terminal_observation"]
+                                next_obs[env_idx] = np.array(term_obs[agent])
+
+                        data = {
+                            "obs": storage["obs"][-2][agent].numpy(),
+                            "act": one_hot_action,
+                            "next_obs": next_obs,
+                            "rew": reward[:, agent].unsqueeze(-1).numpy(),
+                            "done": done.unsqueeze(-1).numpy(),
+                            "agent": one_hot_agent,
+                        }
+                        rb.add(**data)
+
+            if cfg.train.algorithm_mode == "ops" and total_episodes_completed < cfg.train.pretraining_episodes and cfg.train.delay_training:
+                storage["info"] = []
+                update_step += 1
+                continue
+
+            loss = _compute_loss(model, storage,cfg)
+            #if reward.sum().item()==1:
+            #    print(f"Episodes {total_episodes_completed}, Reward: {reward}")
+            rollout_rewards = torch.stack(storage["rewards"])
+            mean_reward = torch.mean(rollout_rewards).item()
+            reward_history.append(mean_reward)
+            loss_history.append(loss.item())
+
+            if total_episodes_completed % 1000 == 0 :  
+                scalar_loss = loss.item() 
+                print("Episodes completed:",total_episodes_completed," Total episodes ",cfg.train.total_episodes,"And loss",scalar_loss)
+                #if reward_history and loss_history and total_episodes_completed % 1000 == 0:
+                plot_training(cfg,reward_history, loss_history, total_episodes_completed, plot_dir)
+    
             storage["info"] = []
+            optimizer.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
+            optimizer.step()
             update_step += 1
-            continue
-
-        loss = _compute_loss(model, storage,cfg)
-        #if reward.sum().item()==1:
-        #    print(f"Episodes {total_episodes_completed}, Reward: {reward}")
-        rollout_rewards = torch.stack(storage["rewards"])
-        mean_reward = torch.mean(rollout_rewards).item()
-        reward_history.append(mean_reward)
-        loss_history.append(loss.item())
-
-        if total_episodes_completed % 2 == 0 :  
-            scalar_loss = loss.item() 
-            print("Episodes completed:",total_episodes_completed," Total episodes ",cfg.train.total_episodes,"And loss",scalar_loss)
-            #if reward_history and loss_history and total_episodes_completed % 1000 == 0:
-            plot_training(cfg,reward_history, loss_history, total_episodes_completed, plot_dir)
-
-        storage["info"] = []
-        optimizer.zero_grad()
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
-        optimizer.step()
-        update_step += 1
-    envs.close()
-    writer.close()
+        envs.close()
+        writer.close()
 
 if __name__=="__main__":
     main()

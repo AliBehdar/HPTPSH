@@ -40,7 +40,7 @@ train:
   optim_eps : 0.00001
   parallel_envs : 4
   n_steps : 5
-  gamma : 0.999
+  gamma : 0.99
   kl_weight : 0.001
   epochs : 10
   z_features : 10
@@ -49,8 +49,8 @@ train:
   ops_timestep : 100
   delay : 0
   pretraining_steps : 5000
-  update_every_episodes : 5
-  total_episodes : 200
+  update_every_episodes : 3
+  total_episodes : 300
   pretraining_episodes : 50
   average_episode_length : 500
   pretraining_times : 1
