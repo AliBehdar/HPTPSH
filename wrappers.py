@@ -5,7 +5,6 @@ import torch
 import numpy as np
 from gymnasium import ObservationWrapper, spaces
 import gymnasium as gym
-from gymnasium.wrappers import RecordEpisodeStatistics, RecordVideo
 from stable_baselines3.common.vec_env import VecEnvWrapper
 
 class RecordEpisodeStatistics(gym.Wrapper):
@@ -105,7 +104,6 @@ class FlattenObservation(ObservationWrapper):
             ]
         )
 
-
 class SquashDones(gym.Wrapper):
     """Wrapper that squashes multiple dones to a single one using all(dones)"""
     def step(self, action):
@@ -128,7 +126,26 @@ class SquashDones(gym.Wrapper):
 
         return obs, rew, terminated,truncated, info
 
+class PickupRewardWrapper(gym.Wrapper):
+    def __init__(self, env):
+        super().__init__(env)
+        self.pickup_reward = 0.5
+        self.prev_carrying = None
 
+    def reset(self, seed=None, options=None):
+        obs, info = self.env.reset(seed=seed, options=options)
+        self.prev_carrying = [o[2] for o in obs]  # carrying flag is at index 2 in each agent's observation
+        return obs, info
+
+    def step(self, action):
+        
+        obs, rewards, done, info = self.env.step(action)
+        new_carrying = [o[2] for o in obs]  # carrying flag is at index 2
+        for i in range(len(new_carrying)):
+            if new_carrying[i] == 1 and self.prev_carrying[i] == 0:
+                rewards[i] += self.pickup_reward
+        self.prev_carrying = new_carrying
+        return obs, rewards, done,info
 
 class GlobalizeReward(gym.RewardWrapper):
     def reward(self, reward):
@@ -249,3 +266,4 @@ class SMACWrapper(VecEnvWrapper):
         state = self._make_state(len(obs))
         action_mask = self._make_action_mask(len(obs))
         return ((obs, state, action_mask),rew,done,info,)
+

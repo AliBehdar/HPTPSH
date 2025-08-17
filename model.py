@@ -101,16 +101,25 @@ class MultiAgentNetwork(nn.Module):
             out = [x.squeeze(0).squeeze(0) for x in out]
 
         return out
-    def save_transformer(self, path='transformer.pth'):
+    def save_transformer(self):
+
+        path='weight/transformer.pth'
+        
+        import os
+        if not os.path.exists(path):
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+
         torch.save(self.transformer.state_dict(), path)
         print(f"Transformer saved to {path}")
 
     # Optional: Static method to load a standalone transformer (recreates it)
-    @staticmethod
-    def load_transformer(cfg, path='transformer.pth'):
+
+    def load_transformer(self,cfg):
+
+        path='weight/transformer.pth'
         transformer = transformerrr.Transformer(cfg)
         transformer.load_state_dict(torch.load(path))
-        transformer.eval()  # Set to eval mode by default; change if needed
+        #transformer.eval()  # Set to eval mode by default; change if needed
         print(f"Transformer loaded from {path}")
         return transformer
 
@@ -189,7 +198,12 @@ class Policy(nn.Module):
             action_log_probs,
             dist_entropy,
         )
+    def save_transformer(self):     
+        self.actor.save_transformer()
 
+    def load_transformer(self,cfg):
+        transformer=self.actor.load_transformer(cfg)
+        return transformer
 
 class LinearVAE(nn.Module):
     def __init__(self, features, input_size, extra_decoder_input, reconstruct_size):

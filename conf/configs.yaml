@@ -16,7 +16,7 @@ env:
 
 hydra:
   run:
-    dir: ./outputs/${now:%Y-%m-%d-%H-%M-%S}
+    dir: ./outputs/${now:%Y-%m-%d}
   output_subdir: tensorboard
   job:
     chdir: true
@@ -38,9 +38,9 @@ network:
 train:
   lr : 3e-4
   optim_eps : 0.00001
-  parallel_envs : 4
+  parallel_envs : 8
   n_steps : 5
-  gamma : 0.99
+  gamma : 0.992
   kl_weight : 0.001
   epochs : 10
   z_features : 10
@@ -49,16 +49,12 @@ train:
   ops_timestep : 100
   delay : 0
   pretraining_steps : 5000
-  update_every_episodes : 3
-  total_episodes : 300
-  pretraining_episodes : 50
-  average_episode_length : 500
   pretraining_times : 1
   batch_size : 128
-  total_steps : 100000
-  log_interval : 20000
-  save_interval : 1000000
-  eval_interval : 10000
+  total_steps : 500
+  log_interval : 1000
+  save_interval : 10000
+  eval_interval : 1000
   entropy_coef : 0.01
   value_loss_coef : 0.5
   use_proper_termination : True

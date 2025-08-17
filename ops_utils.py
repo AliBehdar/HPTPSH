@@ -13,9 +13,11 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from stable_baselines3.common.vec_env import VecEnvWrapper
 from model import LinearVAE
-
-
-
+import cv2
+from wrappers import *
+from functools import partial
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
+from pathlib import Path
 class rbDataSet(Dataset):
     
     def __init__(self, rb,cfg):
@@ -126,33 +128,36 @@ def plot_clusters(cluster_centers, z,cfg):
     plt.close()
     plt.savefig("cluster.png")
 
-def plot_training(cfg,reward_history, loss_history, step, plot_dir):
+def plot_training(cfg, episode_rewards, loss_history, step, plot_dir):
+    import matplotlib.pyplot as plt
+    import os
 
-    steps = np.arange(len(reward_history)) * cfg.train.log_interval
-    
-    # Create figure and axis
-    fig, ax1 = plt.subplots(figsize=(10, 6))  # Increased figure size for clarity
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 10))  # Two subplots: one for rewards, one for loss
 
-    # Plot Mean Reward on left y-axis
-    ax1.set_xlabel('Update Steps')
-    ax1.set_ylabel('Mean Reward', color='tab:blue')
-    ax1.plot(steps, reward_history, color='tab:blue', label='Mean Reward', linewidth=2)
+    # Plot Episode Rewards
+    episodes = np.arange(1, len(episode_rewards) + 1) if episode_rewards else np.array([])
+    ax1.set_xlabel('Episode')
+    ax1.set_ylabel('Reward', color='tab:blue')
+    if len(episodes) > 0:
+        ax1.plot(episodes, episode_rewards, color='tab:blue', label='Episode Reward', linewidth=2)
     ax1.tick_params(axis='y', labelcolor='tab:blue')
     ax1.axhline(y=0, color='gray', linestyle='--', alpha=0.5)  # Add zero line for reference
     ax1.grid(True, alpha=0.3)  # Add grid for better readability
     ax1.legend(loc='upper left')
+    ax1.set_title(f'Episode Rewards for Chosen Env (Step {step})')
 
-    # Plot Mean Loss on right y-axis
-    ax2 = ax1.twinx()
-    ax2.set_ylabel('Mean Loss', color='tab:red')
-    ax2.plot(steps, loss_history, color='tab:red', label='Mean Loss', linewidth=2)
+    # Plot Loss
+    steps_loss = np.arange(len(loss_history)) * cfg.train.log_interval
+    ax2.set_xlabel('Update Steps')
+    ax2.set_ylabel('Loss', color='tab:red')
+    ax2.plot(steps_loss, loss_history, color='tab:red', label='Loss', linewidth=2)
     ax2.tick_params(axis='y', labelcolor='tab:red')
-    ax2.grid(True, alpha=0.3)  # Sync grid with ax1
+    ax2.grid(True, alpha=0.3)  # Add grid for better readability
     ax2.legend(loc='upper right')
+    ax2.set_title('Training Loss')
 
-    # Adjust layout and title
+    # Adjust layout
     fig.tight_layout()
-    plt.title(f'Training Progress: Reward and Loss (Step {step})', pad=10)
     
     # Ensure plot directory exists
     os.makedirs(plot_dir, exist_ok=True)
@@ -217,3 +222,119 @@ class Torcherize(VecEnvWrapper):
             torch.from_numpy(done).float().to(self.cfg.train.device),
             info,
         )
+
+
+def compute_returns(storage, next_value,cfg):
+    returns = [next_value]
+    for rew, done in zip(reversed(storage["rewards"]), reversed(storage["done"])):
+        ret = returns[0] * cfg.train.gamma + rew * (1 - done.unsqueeze(1))
+        returns.insert(0, ret)
+
+    return returns
+
+
+def compute_loss(model, storage,cfg):
+    with torch.no_grad():
+        next_value = model.get_value(storage["state" if cfg.central_v else "obs"][-1])
+    returns = compute_returns(storage, next_value,cfg)
+
+    input_obs = zip(*storage["obs"])
+    input_obs = [torch.stack(o)[:-1] for o in input_obs]
+
+    if cfg.central_v:
+        input_state = zip(*storage["state"])
+        input_state = [torch.stack(s)[:-1] for s in input_state]
+    else:
+        input_state = None
+
+    input_action_mask = zip(*storage["action_mask"])
+    input_action_mask = [torch.stack(a)[:-1] for a in input_action_mask]
+
+    input_actions = zip(*storage["actions"])
+    input_actions = [torch.stack(a) for a in input_actions]
+
+    values, action_log_probs, entropy = model.evaluate_actions(
+        input_obs, input_actions, input_action_mask, input_state,
+    )
+
+    returns = torch.stack(returns)[:-1]
+    advantage = returns - values
+
+    actor_loss = (
+        -(action_log_probs * advantage.detach()).sum(dim=2).mean()
+        - cfg.train.entropy_coef * entropy
+    )
+    value_loss = (returns - values).pow(2).sum(dim=2).mean()
+
+    loss = actor_loss + cfg.train.value_loss_coef * value_loss
+    return loss
+
+def make_video(cfg,env_name,model,agent_count):
+            # Save video after training, before saving the model
+        video_path = Path.cwd() / f"video/trained_video_{env_name.split(':')[-1]}.mp4"
+        frames = []
+
+        # Temporarily set config for single parallel env using DummyVecEnv
+        original_parallel_envs = cfg.train.parallel_envs
+        original_dummy_vecenv = cfg.dummy_vecenv
+        cfg.train.parallel_envs = 1
+        cfg.dummy_vecenv = True
+
+        render_envs = make_envs(env_name, cfg)
+
+        # Prepare model for single env rollout
+        model.sample_laac(1)
+        if cfg.train.algorithm_mode == "iac":
+            model.laac_sample = torch.arange(agent_count).repeat(1, 1)
+        if cfg.train.algorithm_mode == "ops":
+            model.laac_sample = torch.zeros(1, agent_count).long()
+
+        obs, state, action_mask = render_envs.reset()
+        frames.append(render_envs.render(mode="rgb_array"))
+
+        done = torch.zeros(1, device=cfg.train.device)
+        while not done.any():
+            with torch.no_grad():
+                actions = model.act(obs, action_mask)
+            (obs, state, action_mask), reward, done, info = render_envs.step(actions)
+            frames.append(render_envs.render(mode="rgb_array"))
+
+        render_envs.close()
+
+        # Restore original config values
+        cfg.train.parallel_envs = original_parallel_envs
+        cfg.dummy_vecenv = original_dummy_vecenv
+
+        height, width, _ = frames[0].shape  # Assuming frames are consistent RGB arrays
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # MP4 codec; alternatives: 'XVID' for AVI, 'MJPG' for MJPG
+        video_writer = cv2.VideoWriter(str(video_path), fourcc, 10, (width, height))
+        for frame in frames:
+            video_writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))  # Convert RGB to BGR for OpenCV
+        video_writer.release()
+
+
+wrappers = (
+        RecordEpisodeStatistics,
+        SquashDones,
+        SMACCompatible,
+    )
+
+def make_envs(env_name,cfg):
+    def _env_thunk():
+        env = gym.make(env_name,render_mode="rgb_array",disable_env_checker=True, **cfg.env_args)
+        if cfg.time_limit:
+            env = TimeLimit(env, cfg.time_limit)
+        env =PickupRewardWrapper(env)
+        for wrapper in wrappers:
+            env = wrapper(env)
+        return env
+
+    env_thunks = [partial(_env_thunk) for i in range(cfg.train.parallel_envs)]
+    if cfg.dummy_vecenv:
+        envs = DummyVecEnv(env_thunks)
+        envs.buf_rews = np.zeros((cfg.train.parallel_envs, len(envs.observation_space)), dtype=np.float32)
+    else:
+        envs = SubprocVecEnv(env_thunks, start_method="fork")
+    envs = Torcherize(envs,cfg)
+    envs = SMACWrapper(envs)
+    return envs
